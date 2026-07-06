@@ -19,13 +19,15 @@ description: 诊断并修复 Codex Desktop 插件/工具暴露问题，尤其是
 
 只修复第一个断掉的层级。
 
+处理 OA 工作区浏览器任务时，先应用项目浏览器规则：除非用户明确要求 Chrome，默认浏览器是 Microsoft Edge。官方内置 skill、插件包或后端名称里出现 `Chrome`，只是插件/包名标签，不等于当前被控制的用户页签就是 Google Chrome。
+
 ## 快速流程
 
 1. 先读取相关的内置技能：
    - Chrome：`chrome:control-chrome`
    - 内置浏览器：`browser:control-in-app-browser`
    - Computer Use：`computer-use:computer-use`
-2. 检查当前可调用工具。如果存在 `mcp__node_repl__js`，就使用它。如果只存在 `js_reset` 或 `js_add_node_module_dir`，先用工具发现搜索 `node_repl js`，再判断失败。
+2. 检查当前可调用工具时，不只看聊天 UI 顶层命名空间，也要检查活跃运行时暴露的嵌套工具清单，例如 orchestrator 工具里的 `ALL_TOOLS`。如果任何可调用表面存在 `mcp__node_repl__js`，就使用它。如果只存在 `js_reset` 或 `js_add_node_module_dir`，先用工具发现搜索 `node_repl js`，再判断失败。
 3. 如果缺少 `mcp__node_repl__js`，检查 Codex 内部是否能看到 `node_repl` 但没有暴露给模型。这指向工具表面路由问题，而不是 Chrome 问题。
 4. 检查 `~/.codex/config.toml`、CC Switch provider 模板和 `chrome-native-hosts-v2.json` 是否包含这些键：
    - `[features] apps = false`
@@ -37,6 +39,14 @@ description: 诊断并修复 Codex Desktop 插件/工具暴露问题，尤其是
    - `[plugins."chrome@openai-bundled"] enabled = true`
 5. 使用 Windows UI 兜底前，先通过 `mcp__node_repl__js` 验证官方运行时。
 6. 执行最小的持久修复，然后开启新一轮对话/线程或重启 Codex Desktop。当前请求的工具列表不会热重载。
+
+针对 Edge/OA 验收，在任何修复动作前先做这组无写入验证：
+
+1. 通过 `mcp__node_repl__js` 和官方 `browser-client.mjs` 启动扩展桥。
+2. 调用 `browser.user.openTabs()`。
+3. 根据返回的页签 URL、标题、路由、最近打开时间，以及用户指定的浏览器识别目标；不要根据 `agent.browsers.list().name`、`codex/toolSurface.backend` 或插件目录名判断真实浏览器。
+4. 如果目标 Edge 页签存在，接管该返回的页签对象并继续；不要切到 `mcp__chrome_devtools`。
+5. 如果目标 Edge 页签不存在，先只读检查 Edge 扩展安装、Edge Native Messaging Host 注册、插件运行时可见性和当前工具暴露面。不要在 Chrome 后端会话里调用 `browser.tabs.new()` 后把新建的 Chrome 标签当成 Edge 证据；只有证明真实目标浏览器后，或用户明确接受 Chrome，才允许新开页签。
 
 完整案例历史和精确命令见 `references/casebook.md`。
 
@@ -58,7 +68,20 @@ description: 诊断并修复 Codex Desktop 插件/工具暴露问题，尤其是
 - Codex 更新可能改变内置运行时路径。需要根据当前 Native Host 注册表修复陈旧的 `node_repl.exe`、`node.exe`、`node_modules` 和 Chrome `latest` junction。
 - 不要仅仅因为另一个注册表项不同，就强制重写有效的 `CODEX_CLI_PATH`。如果路径存在且可用，保留它。
 - 当 Codex 扩展已安装并且 Edge 有 Native Messaging Host 注册项时，Edge 可以通过 Chrome 扩展链工作。检查该注册项前，不要断定“Edge 不支持”。
+- 官方内置浏览器 skill 或扩展后端可能显示为 `Chrome`，但 `browser.user.openTabs()` 返回的仍可能是 Microsoft Edge 用户页签。不要只凭 `agent.browsers.list().name`、`codex/toolSurface.backend` 或插件包名判断真实浏览器；要结合返回页签的 URL/标题/最近打开时间、可见浏览器窗口标题、扩展安装和 Native Host 证据识别。
+- 如果任务明确要求 Edge，`mcp__chrome_devtools` 不是可接受替代方案。应走 `mcp__node_repl__js` 官方扩展路径，并接管 `browser.user.openTabs()` 返回的页签对象。
+- 之前一次 OA 失败的原因是跳过“默认 Edge”的项目规则，把官方插件里的 `Chrome` 命名当成 Google Chrome 证据。这不是运行时故障；正确的第一个问题是：`openTabs()` 实际返回了哪个浏览器/哪个页签？
 - MCP 服务器能工作还不够。模型必须实际看见或发现 `mcp__node_repl__js`。
+
+## Edge 事件笔记
+
+当 OA 任务围绕浏览器选择失败时，先检查这个事故模式，再动配置：
+
+- 原因：代理跳过了项目规则“默认使用 Microsoft Edge”，看到官方插件/后端命名里的 `Chrome`，就误以为被控制浏览器是 Google Chrome；但官方扩展链可能返回 Edge 用户页签。这是浏览器识别错误，不是 Edge 不可用的证明。
+- 错误恢复：切到 `mcp__chrome_devtools`、使用独立 Chrome DevTools 会话，或把 Chrome 控制页面当成 Edge 验收等价物。
+- 正确恢复：使用 `mcp__node_repl__js`，导入内置 `browser-client.mjs`，获取 `agent.browsers.get("extension")`，调用 `browser.user.openTabs()`，按返回 URL/标题/最近打开时间选择匹配的 Edge/localhost OA 页签，并接管这个返回的页签对象。
+- 如果 `openTabs()` 里没有目标 Edge 页签，只读诊断 Edge 扩展安装、Edge Native Messaging Host 注册、插件运行时可见性和当前工具暴露面。在证明断裂层级前，不要重装、清缓存、改注册表或重写配置。
+- 如果登录阻塞目标路由，且用户已授权使用已记住凭据或开发/测试账号，浏览器问题还没有结束。应通过可见登录交互或已认证 Edge 页签继续；禁止检查浏览器密码库、cookies、local storage、profile 或 token 文件。
 
 ## 官方文档与社区检索
 
