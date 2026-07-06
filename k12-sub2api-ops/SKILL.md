@@ -1,78 +1,78 @@
 ---
 name: k12-sub2api-ops
-description: Prepare, validate, convert, document, and import K12 OpenAI OAuth account bundles for Sub2API, with format-aware duplicate handling. Use when the user mentions K12 accounts, CPA/CliProxyAPI JSON files, Codex auth JSON, Sub2API account import, LINUX DO K12 packages, "do not refresh token" bundles, shuffled/small-batch K12 imports, same-email/different-account packages, or asks for a ready-to-run server-side K12/Sub2API plan.
+description: 为 Sub2API 准备、校验、转换、记录并导入 K12 OpenAI OAuth 账号包，并按格式感知方式处理重复项。适用于用户提到 K12 账号、CPA/CliProxyAPI JSON 文件、Codex auth JSON、Sub2API 账号导入、LINUX DO K12 包、“不要刷新令牌”包、打乱/小批量 K12 导入、同邮箱不同账号包，或需要可直接在服务器运行的 K12/Sub2API 方案。
 ---
 
-# K12 Sub2API Ops
+# K12 Sub2API 运维
 
-## Core Rule
+## 核心规则
 
-Treat K12 account files as sensitive credentials. Do not print tokens, do not publish bundles, do not read browser cookies/localStorage, do not batch refresh tokens, and do not import into a live Sub2API instance unless the user has clearly authorized the import path and supplied or confirmed admin auth.
+把 K12 账号文件当成敏感凭据处理。不要打印 token，不要发布 bundle，不要读取浏览器 cookies/localStorage，不要批量刷新 token；除非用户已经明确授权导入路径并提供或确认管理员认证，否则不要导入到正在运行的 Sub2API 实例。
 
-## Required Reading
+## 必读材料
 
-For any real K12/Sub2API task, read `references/k12_sub2api_workflow.md` before deciding or editing.
+任何真实的 K12/Sub2API 任务，都要先读 `references/k12_sub2api_workflow.md`，再做判断或编辑。
 
-Read `references/account_formats.md` when classifying input files or converting CPA/Codex JSON.
+分类输入文件或转换 CPA/Codex JSON 时，读取 `references/account_formats.md`。
 
-Read `references/sub2api_contract.md` when importing, writing server instructions, or debugging Sub2API API calls.
+导入、编写服务器指令或调试 Sub2API API 调用时，读取 `references/sub2api_contract.md`。
 
-If the task requires reading LINUX DO bookmarks, topics, floors, replies, or attachments, also use `$linux-do-research`; this skill handles K12/Sub2API decisions, not forum navigation.
+如果任务需要读取 LINUX DO 收藏、主题、楼层、回复或附件，也使用 `$linux-do-research`；本技能处理 K12/Sub2API 决策，不负责论坛导航。
 
-## Workflow
+## 工作流
 
-1. Inventory source files without exposing secrets:
-   - list zip entries and JSON keys;
-   - count accounts;
-   - redact token values;
-   - record source paths and sizes.
-2. Classify each source:
-   - Sub2API bundle JSON: top-level `accounts`;
-   - CPA single-account JSON: top-level `access_token`, `email`, `id_token`, `expired`;
-   - zip of many CPA JSON files;
-   - zip of grouped Sub2API bundles such as high/mid/full/low groups.
-3. Convert to Sub2API bundle shape when needed.
-4. Handle duplicates by source format:
-   - for CPA single-account zip files, keep every JSON entry by default because the same email can map to different `account_id` values;
-   - deduplicate only when explicitly requested or when the same email and same account id/token are confirmed duplicates;
-   - for grouped bundle zips, deduplicate cautiously using the rules in `references/account_formats.md`.
-5. Validate every generated bundle:
-   - `accounts` exists and is a list;
-   - `platform=openai`;
-   - `type=oauth`;
-   - `credentials.plan_type=k12`;
-   - `missing_access_token=0`;
-   - unique email and unique account-id counts are reported, and any repeated emails are explained rather than blindly removed.
-6. Prefer staged import:
-   - recommended/high-confidence bundle first;
-   - test a small number of accounts;
-   - import newer or lower-confidence packages only after the first import works;
-   - for volatile public packages, use shuffled small batches.
-7. If the user asks to replace old accounts or "only use this batch", remove old generated bundle files from the kit, update `run_on_server.sh`/docs to default to the current batch, and keep source downloads unless explicitly told to delete them.
-8. Document exactly what is safe for a server-side Codex to run.
+1. 在不暴露秘密的前提下盘点源文件：
+   - 列出 zip 条目和 JSON 键；
+   - 统计账号数量；
+   - 隐去 token 值；
+   - 记录源路径和大小。
+2. 分类每个来源：
+   - Sub2API bundle JSON：顶层 `accounts`；
+   - CPA 单账号 JSON：顶层 `access_token`、`email`、`id_token`、`expired`；
+   - 包含许多 CPA JSON 文件的 zip；
+   - 包含 high/mid/full/low 等分组 Sub2API bundle 的 zip。
+3. 需要时转换为 Sub2API bundle 结构。
+4. 按来源格式处理重复项：
+   - 对 CPA 单账号 zip 文件，默认保留每个 JSON 条目，因为同一邮箱可能映射到不同 `account_id`；
+   - 只有在用户明确要求，或确认同一邮箱和同一 account id/token 是重复项时才去重；
+   - 对分组 bundle zip，根据 `references/account_formats.md` 的规则谨慎去重。
+5. 校验每个生成的 bundle：
+   - `accounts` 存在且为列表；
+   - `platform=openai`；
+   - `type=oauth`；
+   - `credentials.plan_type=k12`；
+   - `missing_access_token=0`；
+   - 报告唯一邮箱和唯一 account-id 数量，并解释任何重复邮箱，而不是盲目删除。
+6. 优先分阶段导入：
+   - 先导入 recommended/high-confidence bundle；
+   - 测试少量账号；
+   - 首次导入成功后，再导入更新或可信度较低的包；
+   - 对易失的公开包，使用打乱的小批量。
+7. 如果用户要求替换旧账号或“只用这一批”，从 kit 中移除旧的生成 bundle 文件，更新 `run_on_server.sh`/文档，使默认使用当前批次；除非用户明确要求删除源下载，否则保留源下载。
+8. 精确记录服务器侧 Codex 可以安全执行什么。
 
-## Reusable Scripts
+## 可复用脚本
 
-Use bundled scripts by copying them into the working kit or running them from the skill path.
+从技能路径运行内置脚本，或把它们复制到工作 kit 中使用。
 
-- `scripts/build_cpa_bundle.py`: convert one or more CPA single-account zip files into a Sub2API bundle.
-- `scripts/build_k12_bundle.py`: combine grouped K12 bundle zip entries into recommended/all Sub2API bundles; adjust group names if the source package differs.
-- `scripts/import_sub2api_bundle.py`: preview/import a Sub2API bundle through the Sub2API admin API.
+- `scripts/build_cpa_bundle.py`：把一个或多个 CPA 单账号 zip 文件转换为 Sub2API bundle。
+- `scripts/build_k12_bundle.py`：把分组 K12 bundle zip 条目合并为 recommended/all Sub2API bundle；如果源包分组名称不同，需要调整组名。
+- `scripts/import_sub2api_bundle.py`：通过 Sub2API admin API 预览/导入 Sub2API bundle。
 
-Always run preview mode before `--execute`.
+执行 `--execute` 前始终先跑 preview 模式。
 
-## Deliverable Checklist
+## 交付清单
 
-Include these files in a ready-to-run kit when possible:
+可行时，在可直接运行的 kit 中包含这些文件：
 
-- `data/*.json` Sub2API bundles;
-- manifest JSON with sources, counts, duplicates, and warnings;
-- `scripts/import_sub2api_bundle.py`;
-- rebuild scripts for source formats used;
-- `run_on_server.sh` or equivalent server command wrapper;
-- `README.md`;
-- `SERVER_CODEX_PROMPT.md`.
+- `data/*.json` Sub2API bundle；
+- manifest JSON，包含来源、数量、重复项和警告；
+- `scripts/import_sub2api_bundle.py`；
+- 用于所用来源格式的重建脚本；
+- `run_on_server.sh` 或等价的服务器命令包装器；
+- `README.md`；
+- `SERVER_CODEX_PROMPT.md`。
 
-## Reporting
+## 报告
 
-Report source coverage, generated files, account counts, missing-token counts, overlap/duplicate handling, validation commands, imports actually executed, downloaded files, config changes, running processes, and cleanup decisions.
+报告来源覆盖、生成文件、账号数量、缺失 token 数量、重叠/重复处理、校验命令、实际执行的导入、下载文件、配置变化、运行中进程和清理决策。

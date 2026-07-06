@@ -1,16 +1,16 @@
-# Sub2API Import Contract
+# Sub2API 导入契约
 
-Use this reference when importing K12 bundles into Sub2API or writing server-side instructions.
+导入 K12 bundle 到 Sub2API 或编写服务器侧指令时使用此参考文档。
 
-## Known API Contract
+## 已知 API 契约
 
-Verified frontend/API facts:
+已验证的前端/API 事实：
 
-- Login endpoint: `POST /auth/login`
-- Account export/import endpoint: `GET /admin/accounts/data?include_proxies=false`
-- Account import endpoint: `POST /admin/accounts/data`
-- Auth header: `Authorization: Bearer <auth_token>`
-- Import payload shape:
+- 登录端点：`POST /auth/login`
+- 账号导出/导入端点：`GET /admin/accounts/data?include_proxies=false`
+- 账号导入端点：`POST /admin/accounts/data`
+- 认证 header：`Authorization: Bearer <auth_token>`
+- 导入 payload 结构：
 
 ```json
 {
@@ -23,7 +23,7 @@ Verified frontend/API facts:
 }
 ```
 
-Responses may be wrapped as:
+响应可能被包装为：
 
 ```json
 {
@@ -32,35 +32,35 @@ Responses may be wrapped as:
 }
 ```
 
-Treat nonzero `code` as an API error.
+把非零 `code` 视为 API 错误。
 
-## Authentication Options
+## 认证选项
 
-Use one of:
+使用以下之一：
 
-1. `SUB2API_AUTH_TOKEN`: admin bearer token.
-2. `SUB2API_LOGIN` and `SUB2API_PASSWORD`: login through `/auth/login`.
-3. `SUB2API_COOKIE`: only if the user/server explicitly provides it. Do not extract browser cookies.
+1. `SUB2API_AUTH_TOKEN`：管理员 bearer token。
+2. `SUB2API_LOGIN` 和 `SUB2API_PASSWORD`：通过 `/auth/login` 登录。
+3. `SUB2API_COOKIE`：只有在用户/服务器明确提供时使用。不要提取浏览器 cookies。
 
-Login payloads to try:
+尝试的登录 payload：
 
-- `{ "email": login, "password": password }` when login contains `@`;
-- `{ "username": login, "password": password }`;
-- `{ "account": login, "password": password }`.
+- 当 login 包含 `@` 时，使用 `{ "email": login, "password": password }`；
+- `{ "username": login, "password": password }`；
+- `{ "account": login, "password": password }`。
 
-Do not print secrets.
+不要打印秘密。
 
-## Preview First
+## 先预览
 
-Preview does not post the import payload. It should:
+Preview 不发送导入 payload。它应该：
 
-- load the bundle;
-- summarize account count, platforms, plan types, missing access token count;
-- print sample identities only, not token values;
-- optionally fetch existing accounts when auth is available and `--skip-existing` is requested;
-- optionally apply shuffle and max account limits.
+- 加载 bundle；
+- 汇总账号数量、platforms、plan types、缺失 access token 数量；
+- 只打印样例身份，不打印 token 值；
+- 当 auth 可用且请求了 `--skip-existing` 时，可选择拉取现有账号；
+- 可选择应用 shuffle 和 max account 限制。
 
-Example:
+示例：
 
 ```bash
 python3 scripts/import_sub2api_bundle.py \
@@ -69,11 +69,11 @@ python3 scripts/import_sub2api_bundle.py \
   --skip-existing
 ```
 
-If auth is missing and `--skip-existing` is requested, fail clearly rather than silently importing duplicates.
+如果 auth 缺失但请求了 `--skip-existing`，要明确失败，而不是静默导入重复项。
 
-## Execute Import
+## 执行导入
 
-Execute only after preview succeeds and the user has authorized live import:
+只有 preview 成功且用户已授权 live import 后才执行：
 
 ```bash
 python3 scripts/import_sub2api_bundle.py \
@@ -83,7 +83,7 @@ python3 scripts/import_sub2api_bundle.py \
   --execute
 ```
 
-For volatile packages:
+对易失包：
 
 ```bash
 python3 scripts/import_sub2api_bundle.py \
@@ -96,98 +96,98 @@ python3 scripts/import_sub2api_bundle.py \
   --execute
 ```
 
-Use the same shuffle seed for preview and execute. A wrapper script should generate one seed and reuse it.
+Preview 和 execute 使用同一个 shuffle seed。包装脚本应生成一个 seed 并复用。
 
-## Existing Account Skip
+## 跳过现有账号
 
-Fetch existing account data with:
+用以下请求拉取现有账号数据：
 
 ```http
 GET /admin/accounts/data?include_proxies=false
 Authorization: Bearer <token>
 ```
 
-Collect identity keys using:
+收集身份键时使用：
 
-- email;
-- name;
-- chatgpt/account id only as fallback.
+- email；
+- name；
+- chatgpt/account id 仅作为兜底。
 
-Filter bundle accounts before import and report:
+导入前过滤 bundle 账号并报告：
 
-- existing accounts seen;
-- existing identity keys;
-- skipped existing;
-- remaining accounts.
+- 看到的现有账号；
+- 现有身份键；
+- 跳过的现有账号；
+- 剩余账号。
 
-## Server Base URL Discovery
+## 服务器 Base URL 发现
 
-Prefer explicit `SUB2API_BASE_URL`.
+优先使用显式 `SUB2API_BASE_URL`。
 
-If absent, try likely local URLs cautiously:
+如果缺失，谨慎尝试可能的本地 URL：
 
 - `http://127.0.0.1:3000`
 - `http://127.0.0.1:8080`
 
-If the server has deployment config, inspect it read-only to find the reverse proxy or service port.
+如果服务器有部署配置，只读检查它以找到反向代理或服务端口。
 
-Do not mutate service config merely to find the API.
+不要为了查找 API 而修改服务配置。
 
-## Verification After Import
+## 导入后验证
 
-Verify via API or admin UI:
+通过 API 或 admin UI 验证：
 
-- accounts exist;
-- platform is OpenAI;
-- auth type is OAuth;
-- plan type is K12;
-- imported accounts are not all paused;
-- a small sample can be tested;
-- no batch refresh was triggered.
+- 账号存在；
+- platform 是 OpenAI；
+- auth type 是 OAuth；
+- plan type 是 K12；
+- 导入账号没有全部 paused；
+- 可以测试少量样例；
+- 没有触发批量 refresh。
 
-Report errors and partial imports precisely.
+精确报告错误和部分导入。
 
-## Failure Handling
+## 失败处理
 
-If the API returns errors:
+如果 API 返回错误：
 
-- preserve the bundle files;
-- do not retry with a larger batch;
-- retry with `--max-accounts 1` only if safe and authorized;
-- check whether auth expired;
-- check whether payload shape changed;
-- check whether server-side validation rejects missing optional fields;
-- never "fix" by refreshing all tokens.
+- 保留 bundle 文件；
+- 不要用更大的批次重试；
+- 只有在安全且获授权时，才用 `--max-accounts 1` 重试；
+- 检查 auth 是否过期；
+- 检查 payload 结构是否变化；
+- 检查服务器侧校验是否拒绝缺失的可选字段；
+- 永远不要通过刷新所有 token 来“修复”。
 
-If import partially succeeds:
+如果导入部分成功：
 
-- fetch existing accounts;
-- use `--skip-existing`;
-- continue with a smaller batch only after explaining the state.
+- 拉取现有账号；
+- 使用 `--skip-existing`；
+- 解释状态后再用更小批次继续。
 
-## Security Boundaries
+## 安全边界
 
-Allowed without extra authorization:
+无需额外授权即可执行：
 
-- read local bundle files;
-- run preview mode;
-- inspect server config read-only;
-- validate JSON structure;
-- produce commands/prompts.
+- 读取本地 bundle 文件；
+- 运行 preview 模式；
+- 只读检查服务器配置；
+- 校验 JSON 结构；
+- 生成命令/prompt。
 
-Needs explicit authorization:
+需要明确授权：
 
-- live import `--execute`;
-- editing Sub2API config;
-- restarting services;
-- deleting/pausing accounts;
-- refreshing tokens;
-- exporting live account data beyond identity counts.
+- live import `--execute`；
+- 编辑 Sub2API 配置；
+- 重启服务；
+- 删除/暂停账号；
+- 刷新 token；
+- 导出 live account data 超出身份计数范围。
 
-Forbidden unless the user provides a narrow, explicit instruction and it is safe:
+除非用户给出狭窄、明确且安全的指令，否则禁止：
 
-- extracting browser cookies;
-- reading browser localStorage/sessionStorage for auth;
-- publishing account bundles;
-- printing tokens;
-- production database writes.
+- 提取浏览器 cookies；
+- 读取浏览器 localStorage/sessionStorage 作为 auth；
+- 发布账号 bundle；
+- 打印 token；
+- 写生产数据库。

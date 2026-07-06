@@ -1,10 +1,10 @@
-# K12 Account Formats
+# K12 账号格式
 
-Use this reference when inspecting, converting, or validating K12 account packages. Never print raw token values.
+检查、转换或校验 K12 账号包时使用此参考文档。永远不要打印原始 token 值。
 
-## Sub2API Bundle JSON
+## Sub2API Bundle JSON 格式
 
-Shape:
+结构：
 
 ```json
 {
@@ -30,16 +30,16 @@ Shape:
 }
 ```
 
-Minimum required for this workflow:
+此工作流的最低要求：
 
-- top-level `accounts` is a list;
-- every account uses `platform=openai`;
-- every account uses `type=oauth`;
-- every account has `credentials.access_token`;
-- every account has `credentials.plan_type=k12`;
-- every account has an identity such as `credentials.email` or `name`.
+- 顶层 `accounts` 是列表；
+- 每个账号使用 `platform=openai`；
+- 每个账号使用 `type=oauth`；
+- 每个账号都有 `credentials.access_token`；
+- 每个账号都有 `credentials.plan_type=k12`；
+- 每个账号都有身份字段，例如 `credentials.email` 或 `name`。
 
-Useful optional fields:
+有用的可选字段：
 
 - `auto_pause_on_expired: true`
 - `concurrency: 10`
@@ -48,13 +48,13 @@ Useful optional fields:
 - `extra.source`
 - `extra.email`
 - `credentials.id_token`
-- `credentials.refresh_token` if present in the source
+- 如果源中存在，则包含 `credentials.refresh_token`
 - `credentials.client_id`
 - `credentials.expires_at`
 
-## CPA Single-Account JSON
+## CPA 单账号 JSON
 
-Shape commonly seen in forum CPA zip packages:
+论坛 CPA zip 包中常见结构：
 
 ```json
 {
@@ -69,69 +69,69 @@ Shape commonly seen in forum CPA zip packages:
 }
 ```
 
-Convert one file into one Sub2API account:
+把一个文件转换为一个 Sub2API 账号：
 
-- `platform`: `openai`
-- `type`: `oauth`
-- `name`: email local part, sanitized
-- `credentials.access_token`: source `access_token`
-- `credentials.email`: source `email`
-- `credentials.id_token`: source `id_token`
-- `credentials.refresh_token`: source `refresh_token` if present, otherwise empty string
-- `credentials.chatgpt_account_id`: source `account_id`
-- `credentials.account_id`: source `account_id`
-- `credentials.expires_at`: unix timestamp parsed from `expired`
-- `credentials.plan_type`: `k12`
-- `extra.source`: source zip basename
-- `extra.source_entry`: original zip entry path
-- `extra.source_type`: source `type`
-- `extra.last_refresh_at`: parsed timestamp from `last_refresh`
+- `platform`：`openai`
+- `type`：`oauth`
+- `name`：清理后的邮箱本地部分
+- `credentials.access_token`：源 `access_token`
+- `credentials.email`：源 `email`
+- `credentials.id_token`：源 `id_token`
+- `credentials.refresh_token`：源 `refresh_token`，不存在时为空字符串
+- `credentials.chatgpt_account_id`：源 `account_id`
+- `credentials.account_id`：源 `account_id`
+- `credentials.expires_at`：从 `expired` 解析出的 Unix timestamp
+- `credentials.plan_type`：`k12`
+- `extra.source`：源 zip basename
+- `extra.source_entry`：原始 zip 条目路径
+- `extra.source_type`：源 `type`
+- `extra.last_refresh_at`：从 `last_refresh` 解析出的 timestamp
 
-Do not assume `refresh_token` exists. Many shared CPA files have access/id token only.
+不要假设 `refresh_token` 存在。许多共享 CPA 文件只有 access/id token。
 
-For CPA single-account zip files, default to keeping every JSON entry. Do not remove entries merely because the email repeats. A repeated email can legitimately have different `account_id` / `chatgpt_account_id` values and should be imported as separate accounts unless the user asks to deduplicate or the entries are proven identical by account id and token.
+对 CPA 单账号 zip 文件，默认保留每个 JSON 条目。不要仅因为邮箱重复就移除条目。重复邮箱可能合法地拥有不同 `account_id` / `chatgpt_account_id`，除非用户要求去重，或按 account id 和 token 证明条目完全相同，否则应作为独立账号导入。
 
-## Grouped K12 Bundle Zip
+## 分组 K12 Bundle Zip
 
-Some zip files contain several Sub2API-style bundle JSON files, for example:
+有些 zip 文件包含多个 Sub2API 风格的 bundle JSON 文件，例如：
 
 - `k12_5h_high_36.json`
 - `k12_5h_mid_73.json`
 - `k12_5h_full_203.json`
 - `k12_5h_low_1022.json`
 
-Handle these by reading the named JSON entries and combining their `accounts` lists with cautious deduplication, because these grouped bundles often intentionally repeat the same workspace id across many emails.
+处理方式：读取命名 JSON 条目，并谨慎合并它们的 `accounts` 列表。需要谨慎去重，因为这些分组 bundle 经常有意让许多邮箱重复使用同一 workspace id。
 
-Typical strategy:
+典型策略：
 
-- recommended bundle: high + mid + full groups;
-- all bundle: high + mid + full + low groups;
-- manifest: record per-group input count, added count, and duplicates skipped.
+- recommended bundle：high + mid + full 组；
+- all bundle：high + mid + full + low 组；
+- manifest：记录每组输入数量、添加数量和跳过的重复项。
 
-## Identity And Deduplication
+## 身份与去重
 
-Use this identity function only when deduplication is explicitly part of the task:
+只有当去重明确属于任务时，才使用此身份函数：
 
-1. exact `credentials.account_id` / `chatgpt_account_id` plus `credentials.email`, when both are present;
-2. exact access token prefix, when comparing suspected exact duplicate files;
-3. `credentials.email` or top-level `email`, only for grouped bundles where repeated email should not produce multiple accounts;
-4. top-level `name`, only when no better identity exists.
+1. 当两者都存在时，使用精确的 `credentials.account_id` / `chatgpt_account_id` 加 `credentials.email`；
+2. 比较疑似完全重复文件时，使用精确 access token 前缀；
+3. 仅对分组 bundle 使用 `credentials.email` 或顶层 `email`，因为重复邮箱不应产生多个账号；
+4. 没有更好身份字段时，使用顶层 `name`。
 
-Reason: there are two opposite failure modes. Some K12 dumps share one ChatGPT workspace/account id across many distinct users, so account id alone can collapse valid accounts. Other CPA zips can contain the same email with different account ids, so email alone can collapse valid accounts. Deduplication must be format-aware and evidence-based.
+原因：这里有两种相反的失败模式。有些 K12 dump 让许多不同用户共享同一个 ChatGPT workspace/account id，所以只看 account id 会合并掉有效账号。另一些 CPA zip 可以包含同一邮箱但不同 account id，所以只看邮箱也会合并掉有效账号。去重必须感知格式，并基于证据。
 
-## Secret-Safe Inspection
+## 安全检查秘密
 
-Use counts and keys instead of token output:
+使用数量和键名，而不是输出 token：
 
-- zip entry names;
-- top-level JSON keys;
-- credential keys;
-- `HasAccessToken=true/false`;
-- `HasRefreshToken=true/false`;
-- email/name sample only if acceptable;
-- token string lengths only if needed.
+- zip 条目名；
+- 顶层 JSON 键；
+- credential 键；
+- `HasAccessToken=true/false`；
+- `HasRefreshToken=true/false`；
+- 只有在可接受时才给邮箱/name 样例；
+- 只有在需要时才给 token 字符串长度。
 
-Redact keys matching:
+隐去匹配这些名称的键：
 
 - `access_token`
 - `refresh_token`
@@ -141,16 +141,16 @@ Redact keys matching:
 - `cookie`
 - `bearer`
 
-## Validation Checklist
+## 校验清单
 
-For every generated bundle:
+对每个生成的 bundle：
 
-- account count matches manifest;
-- account count matches source-entry count unless deduplication was explicitly requested;
-- repeated emails are reported with account-id counts rather than removed automatically;
-- `missing_access_token = 0`;
-- all `platform` values are `openai`;
-- all `type` values are `oauth`;
-- all plan types are `k12`;
-- no bundle accidentally contains cookies or browser session storage;
-- no raw tokens were printed into logs or docs.
+- 账号数量与 manifest 一致；
+- 除非明确请求去重，否则账号数量与源条目数量一致；
+- 重复邮箱以 account-id 数量报告，而不是自动删除；
+- `missing_access_token = 0`；
+- 所有 `platform` 值都是 `openai`；
+- 所有 `type` 值都是 `oauth`；
+- 所有 plan type 都是 `k12`；
+- bundle 没有意外包含 cookies 或浏览器会话存储；
+- 没有把原始 token 打印到日志或文档。

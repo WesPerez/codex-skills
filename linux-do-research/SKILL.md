@@ -1,107 +1,107 @@
 ---
 name: linux-do-research
-description: Unified network-first LINUX DO research workflow for forum searches, K12 posts, topic evidence, replies/floors, links, attachments, bookmarks, and browser-backed verification. Use pure network search/readers first; use Microsoft Edge/browser-plugin fallback only when network evidence is incomplete, untrusted, blocked, or the user explicitly asks for Edge/browser/current-tab/bookmark/logged-in-visible details.
+description: 统一的网络优先 LINUX DO 研究流程，覆盖论坛搜索、K12 帖子、主题证据、回复/楼层、链接、附件、收藏和浏览器辅助验证。先使用纯网络搜索/reader；只有在网络证据不完整、不可信、被阻断，或用户明确要求 Edge/浏览器/当前标签页/收藏/登录可见细节时，才使用 Microsoft Edge/浏览器插件兜底。
 ---
 
-# LINUX DO Research
+# LINUX DO 研究
 
-## Core Rule
+## 核心规则
 
-Use this skill as the single entry point for LINUX DO research. Always start with pure network methods unless the user gives a specific existing browser tab/bookmark page/current-tab target that cannot be represented as a URL or search query.
+把本技能作为 LINUX DO 研究的单一入口。除非用户给出特定的现有浏览器标签页、收藏页或当前标签页目标且无法表示为 URL 或搜索查询，否则始终先从纯网络方法开始。
 
-In this environment, start LINUX DO and `r.jina.ai` network requests with the local proxy `http://127.0.0.1:10808` and command-local timeouts. Do not spend the initial pass waiting on direct requests that usually time out.
+在此环境中，对 LINUX DO 和 `r.jina.ai` 的网络请求从本地代理 `http://127.0.0.1:10808` 加命令级超时开始。不要在初始阶段等待通常会超时的直连请求。
 
-Prefer network search and reader pages because they are quieter, safer, and easier to audit. Use Microsoft Edge/browser-plugin fallback only when network methods cannot produce enough original, verifiable evidence, or when the user explicitly requests browser/current-tab/bookmark/logged-in-visible forum work.
+优先使用网络搜索和 reader 页面，因为它们更安静、更安全，也更容易审计。只有网络方法无法产生足够的原始可验证证据，或用户明确要求浏览器/当前标签页/收藏/登录可见论坛工作时，才使用 Microsoft Edge/浏览器插件兜底。
 
-Do not use Edge, Chrome, browser plugins, cookies, localStorage, sessionStorage, saved passwords, or forum-auth headers during the network pass.
+网络阶段不要使用 Edge、Chrome、浏览器插件、cookies、localStorage、sessionStorage、保存的密码或论坛认证 headers。
 
-When using the browser fallback, use Microsoft Edge by default. Prefer the user's existing Edge tab. Do not use Chrome unless the user explicitly asks for Chrome. Track every temporary tab you create, close only tabs proven created by this task, and report tab handling in the final answer.
+使用浏览器兜底时，默认使用 Microsoft Edge。优先接管用户现有的 Edge 标签页。除非用户明确要求 Chrome，否则不要使用 Chrome。记录每个临时创建的标签页，只关闭能证明由本任务创建的标签页，并在最终答复报告标签页处理情况。
 
-Do not navigate browser/plugin tabs to `https://linux.do/t/topic/<id>.json`. Those pages are commonly blocked by Cloudflare in the browser path and waste time. Use normal topic URLs and targeted topic-position URLs (`/<floor>`) and extract DOM-visible content instead. Shell/network JSON may still be tried during the network pass when it is reachable without browser credentials.
+不要把浏览器/插件标签页导航到 `https://linux.do/t/topic/<id>.json`。这些页面在浏览器路径里经常被 Cloudflare 阻断，会浪费时间。使用普通主题 URL 和定向楼层 URL（`/<floor>`），提取 DOM 可见内容。网络阶段如果无需浏览器凭据即可访问，仍可尝试 shell/network JSON。
 
-## Required Reading
+## 必读材料
 
-Read `references/network_workflow.md` before doing LINUX DO research, especially before claiming floor coverage, downloading attachments, or deciding whether browser fallback is necessary.
+执行 LINUX DO 研究前读取 `references/network_workflow.md`，尤其是在声明楼层覆盖、下载附件或决定是否需要浏览器兜底前。
 
-Read `references/edge_tab_lifecycle.md` before using browser automation.
+使用浏览器自动化前读取 `references/edge_tab_lifecycle.md`。
 
-Read `references/discourse_extraction.md` before claiming that all floors/replies were read.
+声明已读取所有楼层/回复前读取 `references/discourse_extraction.md`。
 
-Read `references/attachments_and_links.md` before downloading attachments or following links.
+下载附件或跟随链接前读取 `references/attachments_and_links.md`。
 
-Use `references/research_audit_template.md` to maintain coverage notes for bookmarks, floors, links, attachments, and tab cleanup.
+使用 `references/research_audit_template.md` 维护收藏、楼层、链接、附件和标签页清理的覆盖笔记。
 
-## Workflow
+## 工作流
 
-1. Clarify the research target from the user request:
-   - exact topic URL or topic ID;
-   - search terms and synonyms;
-   - bookmarks page, current Edge tab title, all floors, selected links, attachments, or tutorials;
-   - whether they need every floor/attachment/link or only a focused answer.
-2. Discover candidate URLs without browser plugins:
-   - use search engines through proxy-backed `curl` when available;
-   - use `site:linux.do` queries and exact quoted titles;
-   - treat search snippets as discovery only, not final evidence.
-3. Read original topic content through network methods:
-   - try `https://r.jina.ai/http://r.jina.ai/http://linux.do/t/topic/<id>`;
-   - try targeted topic-position URLs such as `/7`, `/14`, `/30` for missing ranges;
-   - try direct Discourse JSON only from shell/network when it is reachable without browser credentials.
-4. Track network coverage before concluding:
-   - title, URL, visible post count or highest floor;
-   - floors actually read;
-   - floors only seen as placeholders;
-   - links and attachments discovered;
-   - remaining gaps and why they matter.
-5. Escalate to browser fallback only for the specific gaps when:
-   - the user explicitly asks to use Edge/browser, an existing tab, bookmarks, logged-in state, or plugin-based reading;
-   - network output has only summaries/snippets and not original post text;
-   - important floors are missing, cloaked, or only visible as placeholders;
-   - a key attachment, image, linked tutorial, or CDN redirect cannot be resolved without the browser;
-   - the question requires strong evidence and the network path leaves a material gap;
-   - direct requests are blocked by Cloudflare and Jina/search caches are stale, incomplete, or contradictory.
-6. If browser fallback is needed, audit open Edge tabs:
-   - identify the user-owned target tab by title/URL;
-   - do not open a duplicate if the existing tab satisfies the task.
-7. Read browser pages efficiently:
-   - use DOM extraction from the current topic;
-   - if floors are cloaked/lazy-loaded, open one targeted temporary topic-position tab such as `/7` or `/10`, extract the missing range, then close it.
-8. Track final coverage:
-   - record title, URL, expected post count/highest floor if visible;
-   - record floor numbers successfully read;
-   - record gaps and how they were closed;
-   - do not claim full coverage until gaps are resolved.
-9. Follow links only when useful:
-   - prioritize linked tutorials, source posts, attachment links, and links mentioned as instructions;
-   - avoid wandering into unrelated discussions.
-10. Download attachments only when needed:
-   - try network-safe reads first;
-   - resolve forum short URLs through Edge if Cloudflare blocks direct requests;
-   - download from the resolved CDN URL if it does not require cookies;
-   - verify file path, size, and structure.
-11. Summarize findings with evidence:
-   - network methods used and whether browser fallback was necessary;
-   - topic and floor coverage;
-   - attachments and downloaded files;
-   - key warnings/instructions from replies;
-   - unresolved gaps.
+1. 从用户请求中明确研究目标：
+   - 精确主题 URL 或 topic ID；
+   - 搜索词和同义词；
+   - 收藏页、当前 Edge 标签页标题、所有楼层、指定链接、附件或教程；
+   - 他们需要每个楼层/附件/链接，还是只要聚焦答案。
+2. 不使用浏览器插件发现候选 URL：
+   - 可用时通过代理支持的 `curl` 使用搜索引擎；
+   - 使用 `site:linux.do` 查询和精确引用标题；
+   - 把搜索摘要只当发现线索，不当最终证据。
+3. 通过网络方法读取原始主题内容：
+   - 尝试 `https://r.jina.ai/http://r.jina.ai/http://linux.do/t/topic/<id>`；
+   - 对缺失范围尝试 `/7`、`/14`、`/30` 等定向楼层 URL；
+   - 仅当无需浏览器凭据即可访问时，从 shell/network 尝试直接 Discourse JSON。
+4. 下结论前跟踪网络覆盖：
+   - 标题、URL、可见帖子数或最高楼层；
+   - 实际读取的楼层；
+   - 只看到占位符的楼层；
+   - 发现的链接和附件；
+   - 剩余缺口以及它们为什么重要。
+5. 只有在这些具体缺口出现时才升级到浏览器兜底：
+   - 用户明确要求使用 Edge/浏览器、现有标签页、收藏、登录态或插件读取；
+   - 网络输出只有摘要/片段，没有原帖文本；
+   - 重要楼层缺失、被 cloaked，或只作为占位符可见；
+   - 关键附件、图片、链接教程或 CDN 跳转无法脱离浏览器解析；
+   - 问题需要强证据，而网络路径留下实质缺口；
+   - 直连被 Cloudflare 阻断，Jina/搜索缓存陈旧、不完整或相互矛盾。
+6. 如果需要浏览器兜底，审计打开的 Edge 标签页：
+   - 通过标题/URL 识别用户拥有的目标标签页；
+   - 如果现有标签页能满足任务，不要重复打开。
+7. 高效读取浏览器页面：
+   - 从当前主题提取 DOM；
+   - 如果楼层被 cloaked/lazy-loaded，打开一个定向临时主题位置标签页，例如 `/7` 或 `/10`，提取缺失范围，然后关闭它。
+8. 跟踪最终覆盖：
+   - 记录标题、URL、预期帖子数/最高楼层（如果可见）；
+   - 记录成功读取的楼层号；
+   - 记录缺口以及如何补齐；
+   - 缺口解决前不要声称完整覆盖。
+9. 只在有用时跟随链接：
+   - 优先处理链接教程、来源帖子、附件链接，以及作为操作说明提到的链接；
+   - 避免跑到无关讨论中。
+10. 只在需要时下载附件：
+   - 先尝试网络安全读取；
+   - 如果 Cloudflare 阻断直连，通过 Edge 解析论坛短 URL；
+   - 如果解析后的 CDN URL 不需要 cookies，再下载；
+   - 校验文件路径、大小和结构。
+11. 用证据总结发现：
+   - 使用的网络方法，以及是否需要浏览器兜底；
+   - 主题和楼层覆盖；
+   - 附件和下载文件；
+   - 回复中的关键警告/说明；
+   - 未解决缺口。
 
-## Browser Safety
+## 浏览器安全
 
-Never extract browser cookies, localStorage, sessionStorage, saved passwords, profile files, or auth headers. Do not post, like, bookmark, reply, upload, or otherwise mutate forum state unless explicitly requested.
+永远不要提取浏览器 cookies、localStorage、sessionStorage、保存的密码、profile 文件或认证 headers。除非明确要求，否则不要发帖、点赞、收藏、回复、上传或以其他方式修改论坛状态。
 
-## Final Audit
+## 最终审计
 
-Before final response:
+最终答复前：
 
-- report network methods used and whether a local proxy was used;
-- report URLs read and exact floor coverage;
-- report links followed and attachments attempted/downloaded;
-- report files created or downloaded, with absolute paths and sizes;
-- report cleanup actions or retained artifacts;
-- report whether browser escalation was needed or deliberately not used;
-- run an Edge tab audit;
-- close only known task-created temporary tabs that are no longer needed;
-- keep user-owned or ambiguous tabs open;
-- report opened tabs, closed tabs, retained tabs, and tabs not closed due to unclear ownership;
-- report downloads and generated files;
-- report whether all requested floors/bookmarks were actually read.
+- 报告使用的网络方法以及是否使用本地代理；
+- 报告读取过的 URL 和精确楼层覆盖；
+- 报告跟随的链接和尝试/下载的附件；
+- 报告创建或下载的文件，包含绝对路径和大小；
+- 报告清理行为或保留的产物；
+- 报告是否需要浏览器升级，或为何刻意未使用；
+- 运行 Edge 标签页审计；
+- 只关闭已知由任务创建且不再需要的临时标签页；
+- 保留用户拥有或归属不明的标签页；
+- 报告打开的标签页、关闭的标签页、保留的标签页，以及因归属不清未关闭的标签页；
+- 报告下载和生成文件；
+- 报告是否实际读取了用户请求的所有楼层/收藏。

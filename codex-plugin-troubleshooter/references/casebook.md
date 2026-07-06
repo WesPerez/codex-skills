@@ -1,48 +1,48 @@
-# Codex Plugin Troubleshooter Casebook
+# Codex 插件排障案例手册
 
-## Why This Exists
+## 为什么存在
 
-This reference captures the local debugging path for repeated Codex Desktop plugin failures where Chrome, Browser Use, Computer Use, or `node_repl` looked installed but the model could not call the official tools.
+这个参考文档记录了本地反复排查 Codex Desktop 插件故障的路径：Chrome、Browser Use、Computer Use 或 `node_repl` 看起来已经安装，但模型无法调用官方工具。
 
-Use it when the live symptom is confusing, when several fixes were tried before, or when Codex updates/CC Switch may have rewritten working settings.
+当现场症状混乱、之前已经尝试过多种修复，或 Codex 更新/CC Switch 可能重写了有效设置时，使用它。
 
-## Local Timeline
+## 本地时间线
 
-1. Chrome/Computer Use plugins were enabled but the model did not receive `mcp__node_repl__js`.
-2. First confirmed that installed plugin icons and skill injection are not enough. The model-visible tool list is a separate layer.
-3. Found one earlier failure where `openaiDeveloperDocs` MCP polluted or crowded the tool surface on custom provider runs. Disabling it fixed one round.
-4. After a Codex update, runtime paths changed. Old configs pointed at stale `node_repl.exe`, `node.exe`, `node_modules`, or Chrome `latest` junctions. `repair-runtime` was added to CC Switch tooling.
-5. Edge initially looked unsupported only because Edge Native Messaging Host registration was missing. Adding `HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.openai.codexextension` restored that side.
-6. A later failure was different: Codex logs showed `node_repl` was discovered, but the current request still exposed only a small tool set and no direct `mcp__node_repl__js`.
-7. Evidence showed `codex_apps` was present with a very large tool count while `node_repl` had only 3 tools. Setting `[features] apps = false` restored direct `mcp__node_repl__js` exposure after restart/new turn.
-8. Official Chrome plugin runtime was then verified through `mcp__node_repl__js` by importing the bundled `browser-client.mjs`, calling `agent.browsers.get("extension")`, and listing open tabs.
-9. A final script correction preserved an existing, working `CODEX_CLI_PATH` instead of forcing it back to an older `.plugin-appserver` alpha binary. Runtime repair now cleans stale paths and temporary `SKY_CUA_*` pipe env without fighting a valid Codex CLI path.
+1. Chrome/Computer Use 插件已启用，但模型没有收到 `mcp__node_repl__js`。
+2. 先确认：插件图标已安装和技能已注入还不够。模型可见工具列表是单独一层。
+3. 曾发现一次早期故障：`openaiDeveloperDocs` MCP 在自定义 provider 运行中污染或挤占了工具表面。禁用它修复了那一轮问题。
+4. Codex 更新后，运行时路径改变。旧配置指向陈旧的 `node_repl.exe`、`node.exe`、`node_modules` 或 Chrome `latest` junction。随后在 CC Switch 工具中加入了 `repair-runtime`。
+5. Edge 起初看起来不支持，只是因为缺少 Edge Native Messaging Host 注册。添加 `HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.openai.codexextension` 后恢复了这一侧。
+6. 后来的一次故障不同：Codex 日志显示已发现 `node_repl`，但当前请求仍只暴露了很小的工具集，没有直接的 `mcp__node_repl__js`。
+7. 证据显示 `codex_apps` 存在且工具数量非常大，而 `node_repl` 只有 3 个工具。设置 `[features] apps = false` 后，在重启/新一轮对话后恢复了直接暴露 `mcp__node_repl__js`。
+8. 随后通过 `mcp__node_repl__js` 验证官方 Chrome 插件运行时：导入内置 `browser-client.mjs`，调用 `agent.browsers.get("extension")`，并列出打开的标签页。
+9. 最后一次脚本修正保留了现有可工作的 `CODEX_CLI_PATH`，而不是强行改回更旧的 `.plugin-appserver` alpha binary。现在运行时修复会清理陈旧路径和临时 `SKY_CUA_*` pipe env，同时不和有效的 Codex CLI 路径对抗。
 
-## Official Findings
+## 官方发现
 
-The OpenAI Codex manual says:
+OpenAI Codex 手册说明：
 
-- `[features]` controls optional and experimental capabilities.
-- `apps` default is `false`.
-- `apps` is Experimental and means "Enable ChatGPT Apps/connectors support".
-- App/connectors have their own `[apps]` controls and are separate from MCP and bundled browser plugins.
+- `[features]` 控制可选和实验性能力。
+- `apps` 默认是 `false`。
+- `apps` 是实验性选项，含义是启用 ChatGPT Apps/connectors 支持。
+- Apps/connectors 有自己的 `[apps]` 控制项，并且与 MCP 和内置浏览器插件分离。
 
-Therefore `features.apps = false` should not disable Chrome, Browser Use, Computer Use, or `node_repl`. It disables ChatGPT app/connectors support such as `codex_apps` connector tooling.
+因此，`features.apps = false` 不应该禁用 Chrome、Browser Use、Computer Use 或 `node_repl`。它禁用的是 `codex_apps` 连接器工具等 ChatGPT app/connectors 支持。
 
-## Community Evidence
+## 社区证据
 
-GitHub issue `openai/codex#28481` reported:
+GitHub issue `openai/codex#28481` 报告：
 
-- `mcp__node_repl__js` unavailable in Codex Desktop 26.609 on Windows.
-- `node_repl` was configured and the runtime existed, but the model tool list did not expose the tool.
-- Browser and Computer Use workflows were unusable because they depend on Node REPL.
-- Later comments showed similar failures on newer Windows Desktop builds and a partial fix where registration improved but routing still had defects.
+- Windows 上的 Codex Desktop 26.609 中 `mcp__node_repl__js` 不可用。
+- `node_repl` 已配置且运行时存在，但模型工具列表没有暴露该工具。
+- Browser 和 Computer Use 工作流不可用，因为它们依赖 Node REPL。
+- 后续评论显示更新的 Windows Desktop 构建也有类似故障，并出现了部分修复：注册有所改善，但路由仍有缺陷。
 
-Use this as proof that the symptom can be a Codex Desktop tool-exposure/routing problem, not only a local machine misconfiguration.
+把它作为证据：该症状可能是 Codex Desktop 工具暴露/路由问题，不只是本机配置错误。
 
-## Evidence Checklist
+## 证据清单
 
-Collect these before fixing:
+修复前收集这些信息：
 
 ```powershell
 Select-String -Path "$env:USERPROFILE\.codex\config.toml" -Pattern '^\[features\]|apps\s*=|openaiDeveloperDocs|node_repl|CODEX_CLI_PATH|BROWSER_USE'
@@ -52,11 +52,11 @@ codex mcp list
 codex plugin list
 ```
 
-When a current tool list is available, check whether `mcp__node_repl__js` is directly callable. If not, use tool discovery for `node_repl js`. If discovery also fails while `codex mcp get node_repl` succeeds, suspect tool exposure.
+如果当前工具列表可用，检查 `mcp__node_repl__js` 是否可直接调用。如果不能，使用工具发现搜索 `node_repl js`。如果发现也失败，但 `codex mcp get node_repl` 成功，怀疑工具暴露问题。
 
-## Official Chrome Runtime Probe
+## 官方 Chrome 运行时探针
 
-Use only when `mcp__node_repl__js` is available:
+仅在 `mcp__node_repl__js` 可用时使用：
 
 ```js
 const { setupBrowserRuntime } = await import("file:///C:/Users/Wes/.codex/plugins/cache/openai-bundled/chrome/26.602.40724/scripts/browser-client.mjs");
@@ -66,11 +66,11 @@ const tabs = await browser.user.openTabs();
 nodeRepl.write(JSON.stringify({ count: tabs.length, sample: tabs.slice(0, 5).map(t => ({ title: t.title, url: t.url })) }, null, 2));
 ```
 
-Versioned plugin paths can change. Resolve the current plugin version before running this on another machine.
+带版本号的插件路径可能变化。在另一台机器运行前，先解析当前插件版本。
 
-## Local Proxy Lookup Pattern
+## 本地代理检索模式
 
-When official docs or GitHub are blocked:
+当官方文档或 GitHub 被阻断时：
 
 ```powershell
 foreach($p in 10808,7890,7897,1080) {
@@ -81,18 +81,18 @@ curl.exe -x http://127.0.0.1:10808 -L -A "Mozilla/5.0" https://developers.openai
 curl.exe -k -x http://127.0.0.1:10808 -L -A "Mozilla/5.0" https://api.github.com/repos/openai/codex/issues/28481
 ```
 
-Use the proxy only for the lookup unless the user explicitly asks to persist proxy config.
+除非用户明确要求持久化代理配置，否则代理只用于这次查询。
 
-## Decision Tree
+## 决策树
 
-- `mcp__node_repl__js` visible and Chrome probe works: plugin chain is healthy.
-- `mcp__node_repl__js` visible but Chrome probe times out: inspect Chrome/Edge extension, Native Messaging Host, and browser process state.
-- `node_repl` configured but `mcp__node_repl__js` not visible: inspect `features.apps`, `openaiDeveloperDocs`, current Desktop version, and tool-surface logs.
-- `node_repl` missing or paths stale: repair runtime paths from `chrome-native-hosts-v2.json`.
-- Edge tabs not visible but Chrome works: check Edge extension install and Edge Native Messaging Host registry.
-- Fix works only until CC Switch/provider switch: sync the known-good config into CC Switch provider templates and `proxy_live_backup`.
+- `mcp__node_repl__js` 可见且 Chrome 探针可用：插件链健康。
+- `mcp__node_repl__js` 可见但 Chrome 探针超时：检查 Chrome/Edge 扩展、Native Messaging Host 和浏览器进程状态。
+- `node_repl` 已配置但 `mcp__node_repl__js` 不可见：检查 `features.apps`、`openaiDeveloperDocs`、当前 Desktop 版本和工具表面日志。
+- `node_repl` 缺失或路径陈旧：根据 `chrome-native-hosts-v2.json` 修复运行时路径。
+- Edge 标签页不可见但 Chrome 可用：检查 Edge 扩展安装和 Edge Native Messaging Host 注册表。
+- 修复只在 CC Switch/provider 切换前有效：把已知良好配置同步到 CC Switch provider 模板和 `proxy_live_backup`。
 
-## Final Known-Good Local Shape
+## 当前本地已知良好形态
 
 ```toml
 [features]
@@ -109,4 +109,4 @@ type = "stdio"
 startup_timeout_sec = 120
 ```
 
-Do not blindly copy paths between machines. Runtime paths are installation-specific.
+不要在机器之间盲目复制路径。运行时路径取决于安装环境。

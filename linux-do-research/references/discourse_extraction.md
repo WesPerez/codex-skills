@@ -1,28 +1,28 @@
-# Discourse Topic And Floor Extraction
+# Discourse 主题与楼层提取
 
-LINUX DO is Discourse-based. Use this reference when reading topics, replies, floors, bookmarks, and activity pages.
+LINUX DO 基于 Discourse。读取主题、回复、楼层、收藏和活动页时使用此参考文档。
 
-## Coverage Standard
+## 覆盖标准
 
-Do not claim "all floors" or "all replies" unless you have:
+除非已经具备以下内容，否则不要声称“所有楼层”或“所有回复”已读取：
 
-- topic URL and title;
-- expected post count or highest visible floor when available;
-- list of floor numbers extracted;
-- explicit handling of missing/cloaked floors;
-- linked topics/tutorials followed when relevant;
-- final gap list is empty or clearly reported.
+- 主题 URL 和标题；
+- 可用时的预期帖子数或最高可见楼层；
+- 已提取楼层号列表；
+- 对缺失/被 cloaked 楼层的明确处理；
+- 相关时跟随链接主题/教程；
+- 最终缺口列表为空，或已清楚报告。
 
-If the user asks "did you read every post?", answer with exact coverage, not confidence language.
+如果用户问“你读完每个帖子了吗？”，用精确覆盖回答，不要用信心措辞。
 
-## Network JSON Only
+## 仅网络 JSON
 
-During the network-first pass, shell/network requests may try Discourse JSON when it is reachable without browser credentials:
+在网络优先阶段，shell/network 请求可以在无需浏览器凭据即可访问时尝试 Discourse JSON：
 
-- topic URL: `https://linux.do/t/topic/2527525`
-- JSON URL: `https://linux.do/t/topic/2527525.json`
+- 主题 URL：`https://linux.do/t/topic/2527525`
+- JSON URL：`https://linux.do/t/topic/2527525.json`
 
-The JSON may contain:
+JSON 可能包含：
 
 - `title`
 - `posts_count`
@@ -30,15 +30,15 @@ The JSON may contain:
 - `post_stream.posts`
 - `post_stream.stream`
 
-Cloudflare can block direct shell requests. If network JSON access fails, use reader pages or escalate to browser DOM extraction.
+Cloudflare 可能阻断直接 shell 请求。如果网络 JSON 访问失败，使用 reader 页面或升级到浏览器 DOM 提取。
 
-Do not navigate browser/plugin tabs to `.json` topic URLs. Browser visits to `https://linux.do/t/topic/<id>.json` are commonly blocked by Cloudflare and waste time. In the browser fallback, use normal topic pages and topic-position URLs such as `/7`, `/14`, and `/30`, then extract DOM-visible floors.
+不要把浏览器/插件标签页导航到 `.json` 主题 URL。浏览器访问 `https://linux.do/t/topic/<id>.json` 经常被 Cloudflare 阻断并浪费时间。在浏览器兜底中，使用普通主题页面和 `/7`、`/14`、`/30` 等主题位置 URL，然后提取 DOM 可见楼层。
 
-Never bypass by stealing cookies from the browser.
+永远不要通过窃取浏览器 cookies 来绕过。
 
-## DOM Extraction Pattern
+## DOM 提取模式
 
-Inside `tab.playwright.evaluate`, extract bounded, structured content:
+在 `tab.playwright.evaluate` 内提取有界、结构化内容：
 
 ```js
 var posts = await tab.playwright.evaluate(() => {
@@ -71,123 +71,123 @@ var posts = await tab.playwright.evaluate(() => {
 });
 ```
 
-Deduplicate wrapper divs and inner articles by floor. Prefer the `ARTICLE` version when present. Ignore pure cloaked placeholder text such as `由 username 于 ... 发布` when it has no body.
+按楼层去重 wrapper div 和内部 article。存在 `ARTICLE` 版本时优先使用。忽略没有正文、只有 `由 username 于 ... 发布` 这类纯 cloaked 占位文本。
 
-## Cloaked Or Lazy Floors
+## Cloaked 或 Lazy 楼层
 
-Discourse often renders distant floors as placeholders:
+Discourse 经常把远处楼层渲染为占位：
 
 ```html
 <div class="post-stream--cloaked" data-post-number="6" id="post_6">
 ```
 
-This does not mean the reply has no content. It means the floor is not loaded.
+这不表示该回复没有内容，只表示楼层未加载。
 
-To load missing floors:
+加载缺失楼层：
 
-1. Determine missing floor range.
-2. Open one temporary topic-position tab:
-   - `/7` to read around floors 6-8;
-   - `/10` to read around floors 9-15;
-   - choose a center floor near the missing range.
-3. Wait briefly for content.
-4. Extract only the needed range.
-5. Close the temporary tab and verify closure.
+1. 确定缺失楼层范围。
+2. 打开一个临时主题位置标签页：
+   - `/7` 用于读取 6-8 楼附近；
+   - `/10` 用于读取 9-15 楼附近；
+   - 选择靠近缺失范围中心的楼层。
+3. 短暂等待内容加载。
+4. 只提取需要的范围。
+5. 关闭临时标签页并验证关闭。
 
-Example temporary URL:
+临时 URL 示例：
 
 ```text
 https://linux.do/t/topic/2527525/7
 ```
 
-Do not leave these temporary tabs open.
+不要让这些临时标签页保持打开。
 
-## Bookmark/Activity Pages
+## 收藏/活动页面
 
-For bookmark pages such as:
+对于收藏页面，例如：
 
 ```text
 https://linux.do/u/<username>/activity/bookmarks
 ```
 
-Use the existing Edge tab if already open. Extract bookmark cards/rows with:
+如果已有 Edge 标签页打开，使用现有标签页。提取收藏卡片/行：
 
-- visible title;
-- URL;
-- category;
-- excerpt;
-- last activity;
-- any tags or metadata visible.
+- 可见标题；
+- URL；
+- 分类；
+- 摘要；
+- 最后活动时间；
+- 任何可见标签或元数据。
 
-Then process each relevant bookmark topic with the topic workflow. If there are many bookmarks and the user wants all of them, keep a progress table:
+然后用主题工作流处理每个相关收藏主题。如果收藏很多且用户要求全部读取，维护进度表：
 
 ```text
-topic_url | title | status | floors_read | links_followed | attachments | notes
+主题 URL | 标题 | 状态 | 已读楼层 | 已跟随链接 | 附件 | 笔记
 ```
 
-Do not silently skip "old" bookmarks unless the user authorized filtering.
+除非用户授权过滤，否则不要因为收藏“看起来旧”就静默跳过。
 
-## Linked Topics And Tutorials
+## 链接主题与教程
 
-Follow links when they plausibly contain:
+当链接可能包含以下内容时跟随它：
 
-- original source package;
-- tutorial/use instructions;
-- password or warning;
-- upstream account-generation method;
-- deletion/cleanup guidance;
-- reply context required to interpret the current post.
+- 原始来源包；
+- 教程/使用说明；
+- 密码或警告；
+- 上游账号生成方法；
+- 删除/清理指导；
+- 解读当前帖所需的回复上下文。
 
-Do not follow unrelated social/profile/category links unless needed.
+除非需要，否则不要跟随无关社交/profile/category 链接。
 
-For each followed link, record:
+对每个跟随的链接，记录：
 
-- source floor;
-- link text;
-- URL;
-- whether opened;
-- key extracted facts;
-- whether temporary tab closed.
+- 来源楼层；
+- 链接文本；
+- URL；
+- 是否打开；
+- 提取的关键事实；
+- 临时标签页是否关闭。
 
-## Floor Summary Format
+## 楼层摘要格式
 
-For a small topic, summarize every floor:
+小主题逐楼总结：
 
 ```text
-1: author - attachments, links, main instructions/warnings.
-2: author - short reaction/no new info.
-3: author - asks about source group/no action.
+1: 作者 - 附件、链接、主要说明/警告。
+2: 作者 - 简短回应/无新增信息。
+3: 作者 - 询问来源群/无需操作。
 ...
 ```
 
-For a large topic, separate:
+大主题分组：
 
-- actionable instructions;
-- warnings/risk reports;
-- attachments;
-- tutorials/links;
-- repeated thanks/noise;
-- unanswered questions.
+- 可执行说明；
+- 警告/风险报告；
+- 附件；
+- 教程/链接；
+- 重复感谢/噪声；
+- 未回答问题。
 
-Still keep coverage records even if the final answer is concise.
+即使最终答案很简洁，也要保留覆盖记录。
 
-## Accuracy Checks
+## 准确性检查
 
-Before concluding:
+下结论前：
 
-- compare extracted floors to expected `posts_count`/highest floor if known;
-- revisit any missing floor range;
-- inspect links in the main post and high-signal replies;
-- verify downloaded attachment sizes against visible forum sizes when possible;
-- state any limits, such as "read visible 1-15 floors; did not read older bookmarked topics".
+- 如果已知，比较提取楼层与预期 `posts_count`/最高楼层；
+- 重新访问任何缺失楼层范围；
+- 检查主帖和高信号回复中的链接；
+- 可行时对照论坛可见大小验证下载附件大小；
+- 说明任何限制，例如“读取了可见 1-15 楼；未读取较旧收藏主题”。
 
-## Common Pitfalls
+## 常见坑
 
-- Reading page 1 only and claiming all replies.
-- Treating cloaked placeholders as empty replies.
-- Opening duplicate tabs for the same URL.
-- Closing the user's original tab.
-- Losing track of temporary download/position tabs.
-- Using direct shell HTTP and treating Cloudflare 403 as proof the resource is inaccessible.
-- Navigating browser/plugin tabs to topic `.json` URLs instead of using normal topic pages and DOM extraction.
-- Printing too much page text instead of extracting structured data.
+- 只读第一页却声称读完所有回复。
+- 把 cloaked 占位符当作空回复。
+- 为同一 URL 打开重复标签页。
+- 关闭用户原始标签页。
+- 丢失临时下载/位置标签页的跟踪。
+- 使用直接 shell HTTP，并把 Cloudflare 403 当作资源不可访问的证明。
+- 把浏览器/插件标签页导航到主题 `.json` URL，而不是使用普通主题页和 DOM 提取。
+- 打印过多页面文本，而不是提取结构化数据。

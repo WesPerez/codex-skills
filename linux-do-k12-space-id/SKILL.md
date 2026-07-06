@@ -1,91 +1,91 @@
 ---
 name: linux-do-k12-space-id
-description: Fast LINUX DO K12 ChatGPT/OpenAI workspace/space ID collection workflow. Use when Codex needs to search or summarize LINUX DO posts for K12 空间ID, 工作区ID, workspace IDs, Gmail/Outlook K12 IDs, source-marked recent K12 space IDs, or publication-order K12 ID lists without wasting time on blocked direct requests.
+description: 快速执行 LINUX DO K12 ChatGPT/OpenAI workspace/space ID 收集流程。适用于 Codex 需要搜索或总结 LINUX DO 帖子中的 K12 空间ID、工作区ID、workspace IDs、Gmail/Outlook K12 IDs、带来源标记的近期 K12 space IDs，或按发帖顺序排列的 K12 ID 列表，并避免在被阻断的直连请求上浪费时间。
 ---
 
-# LINUX DO K12 Space ID
+# LINUX DO K12 空间 ID
 
-## Core Rule
+## 核心规则
 
-Use this skill together with `linux-do-research`, but keep the path narrow: proxy-first network reads, candidate topic discovery, reader verification, UUID extraction, source marking, and final audit. Do not spend time on direct `linux.do`/`r.jina.ai` waits before trying the local proxy.
+将本技能与 `linux-do-research` 配合使用，但保持路径收窄：代理优先的网络读取、候选主题发现、reader 验证、UUID 提取、来源标记和最终审计。尝试本地代理前，不要把时间耗在直连 `linux.do`/`r.jina.ai` 等待上。
 
-Default every network request to:
+默认每个网络请求都使用：
 
 ```powershell
 curl.exe -x http://127.0.0.1:10808 -L --max-time 35 "<url>"
 ```
 
-If the proxy is absent or returns a proxy-connection error, make one short direct retry with `--max-time 15`, then continue with other proxy-backed/search-index paths. Do not persist `HTTP_PROXY` or `HTTPS_PROXY`.
+如果代理不存在或返回代理连接错误，做一次短直连重试（`--max-time 15`），然后继续使用其他代理支持/搜索索引路径。不要持久化 `HTTP_PROXY` 或 `HTTPS_PROXY`。
 
-## Fast Workflow
+## 快速流程
 
-1. Interpret "最近的 N 个帖子" as topic publication order, not reply/activity order.
-2. Start from known high-yield discovery routes:
-   - reader for the K12 aggregation topic: `https://r.jina.ai/http://r.jina.ai/http://linux.do/t/topic/2514402`;
-   - search queries through proxy-backed DDG/other search HTML:
+1. 把“最近的 N 个帖子”理解为主题发布时间顺序，而不是回复/活跃顺序。
+2. 从已知高产发现路径开始：
+   - K12 聚合主题的 reader：`https://r.jina.ai/http://r.jina.ai/http://linux.do/t/topic/2514402`；
+   - 通过代理支持的 DDG/其他搜索 HTML 运行搜索查询：
      - `site:linux.do/t/topic K12 空间ID`
      - `site:linux.do/t/topic K12 工作区ID`
      - `site:linux.do/t/topic K12 gmail 空间`
      - `site:linux.do/t/topic "空间Id是"`
-     - exact titles discovered from related-topic tables.
-3. Extract candidate topic IDs from all `https?://linux.do/t/topic/<id>` URLs. Keep title text when available.
-4. Sort candidates by verified `Published Time` after fetching. Before verified timestamps are available, use topic ID descending only as a temporary approximation.
-5. Fetch each candidate with the Jina reader URL:
+     - 从相关主题表发现的精确标题。
+3. 从所有 `https?://linux.do/t/topic/<id>` URL 中提取候选主题 ID。有标题文本时保留标题。
+4. 抓取后按验证过的 `Published Time` 排序。在获得已验证时间戳前，只能临时用 topic ID 降序近似。
+5. 用 Jina reader URL 抓取每个候选：
    `https://r.jina.ai/http://r.jina.ai/http://linux.do/t/topic/<id>`
-6. For each topic, record:
-   - topic ID, title, URL, `Published Time`;
-   - whether the reader returned original post text, private/404, rate limit, or empty/TLS failure;
-   - UUIDs extracted from visible text, attachment filenames, and decoded obfuscation;
-   - status warnings such as `已失效`, `结束`, `deactivated_workspace`, `Payment Required`, `429`, or replies saying unusable.
-7. Deduplicate by UUID, but keep every source where it appeared.
-8. Output a source map plus a plain text ID list:
-   `uuid | source(s) | status/note`.
+6. 对每个主题记录：
+   - topic ID、标题、URL、`Published Time`；
+   - reader 返回的是原帖文本、private/404、rate limit，还是空内容/TLS 失败；
+   - 从可见文本、附件文件名和解码后的混淆内容中提取的 UUID；
+   - 状态警告，例如 `已失效`、`结束`、`deactivated_workspace`、`Payment Required`、`429`，或回复中说不可用。
+7. 按 UUID 去重，但保留每个出现来源。
+8. 输出来源映射和纯文本 ID 列表：
+   `uuid | source(s) | status/note`。
 
-## What To Avoid
+## 避免事项
 
-- Do not begin with direct `linux.do/search.json` or direct forum search pages; they commonly return Cloudflare, 429, or long waits.
-- Do not use `/latest` as publication order. It is reply/activity order. Use it only to discover recent topic URLs, then verify each topic's `Published Time`.
-- Do not treat search snippets as final evidence. Mark them as `search-snippet only` unless a reader page confirms the content.
-- Do not download account bundles or attachments just to find space IDs. Attachment filenames such as `sub2api-workspace-<uuid>.zip` are enough to record an inferred workspace ID; mark it as filename-derived unless body text confirms it.
-- Do not decode or print access tokens, OAuth credentials, or full account JSON. Only extract non-secret IDs and source metadata.
-- Do not use browser fallback unless the user asks for browser/logged-in reading or the final answer would otherwise be materially wrong. If browser fallback is used, follow `linux-do-research` tab lifecycle rules.
+- 不要从直连 `linux.do/search.json` 或直连论坛搜索页开始；它们常返回 Cloudflare、429 或长时间等待。
+- 不要把 `/latest` 当作发帖顺序。它是回复/活跃顺序。只用它发现近期主题 URL，然后验证每个主题的 `Published Time`。
+- 不要把搜索摘要当作最终证据。除非 reader 页面确认内容，否则标记为 `search-snippet only`。
+- 不要为了找 space ID 而下载账号 bundle 或附件。像 `sub2api-workspace-<uuid>.zip` 这样的附件文件名足以记录推断出的 workspace ID；除非正文确认，否则标记为 filename-derived。
+- 不要解码或打印 access token、OAuth 凭据或完整账号 JSON。只提取非秘密 ID 和来源元数据。
+- 除非用户要求浏览器/登录态读取，或最终答案否则会明显错误，否则不要使用浏览器兜底。如果使用浏览器兜底，遵循 `linux-do-research` 的标签页生命周期规则。
 
-## Extraction Rules
+## 提取规则
 
-Recognize UUID-like space IDs with:
+用以下规则识别 UUID 样式的 space ID：
 
 ```text
 \b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b
 ```
 
-Treat as stronger evidence when a UUID appears near:
+当 UUID 出现在这些内容附近时，视为更强证据：
 
-- `空间`, `空间ID`, `空间Id`, `工作区`, `工作区ID`, `workspace`;
-- filenames like `sub2api-workspace-<uuid>.zip`;
-- replies explicitly saying `空间Id是 <uuid>`.
+- `空间`、`空间ID`、`空间Id`、`工作区`、`工作区ID`、`workspace`；
+- 例如 `sub2api-workspace-<uuid>.zip` 的文件名；
+- 明确说 `空间Id是 <uuid>` 的回复。
 
-Treat as weaker/inferred evidence when a UUID appears only in:
+当 UUID 只出现在这些内容中时，视为较弱/推断证据：
 
-- a generic `sub2api_<uuid>_*.zip` filename;
-- `request id`, `chatgpt_account_id`, or account JSON fields;
-- error logs. In these cases, include it only if the surrounding text clearly ties it to a workspace/space ID, or mark the reason for uncertainty.
+- 通用 `sub2api_<uuid>_*.zip` 文件名；
+- `request id`、`chatgpt_account_id` 或账号 JSON 字段；
+- 错误日志。此类情况只有在上下文清楚把它关联到 workspace/space ID 时才包含，或标明不确定原因。
 
-Handle obfuscation seen in LINUX DO K12 posts:
+处理 LINUX DO K12 帖子中常见的混淆：
 
-- remove inserted marker words such as `编码或解码` inside base64 strings;
-- normalize whitespace;
-- decode base64 chunks when the decoded text contains UUIDs;
-- record that the IDs were decoded from visible post text.
+- 移除 base64 字符串中插入的 `编码或解码` 等标记词；
+- 规范化空白；
+- 当解码后文本包含 UUID 时解码 base64 片段；
+- 记录这些 ID 是从可见帖子文本解码得到的。
 
-## Helper Script
+## 辅助脚本
 
-Use `scripts/collect_k12_space_ids.py` for the standard pass:
+标准流程使用 `scripts/collect_k12_space_ids.py`：
 
 ```powershell
 python "C:\Users\Wes\.codex\skills\linux-do-k12-space-id\scripts\collect_k12_space_ids.py" --limit 30
 ```
 
-Useful options:
+有用选项：
 
 ```powershell
 python "...collect_k12_space_ids.py" --limit 30 --extra-id 2531263 --extra-id 2531087
@@ -93,18 +93,18 @@ python "...collect_k12_space_ids.py" --candidate-id 2533655 --candidate-id 25312
 python "...collect_k12_space_ids.py" --json
 ```
 
-The script uses the proxy first, never writes files, does not download attachments, and prints source-marked results. After running it, manually inspect any high-value private, failed, or search-snippet-only topics if the user asked for maximum coverage.
+该脚本代理优先，不写文件，不下载附件，并打印带来源标记的结果。运行后，如果用户要求最大覆盖，对任何高价值的 private、failed 或 search-snippet-only 主题做人工检查。
 
-## Final Report
+## 最终报告
 
-Include:
+包含：
 
-- the exact ordering basis: verified `Published Time` first, topic ID fallback if needed;
-- source map with topic ID, title, URL, and publish time;
-- deduplicated ID text list with source labels;
-- private/404 or unread recent candidates that could not be verified;
-- whether proxy was used;
-- whether any browser tabs were opened/closed;
-- downloaded files: normally `none`;
-- generated files: normally `none`;
-- config/env changes: normally `none`.
+- 精确排序依据：优先使用已验证的 `Published Time`，必要时使用 topic ID 兜底；
+- 来源映射，包含 topic ID、标题、URL 和发布时间；
+- 带来源标签的去重 ID 文本列表；
+- 无法验证的 private/404 或不可读近期候选；
+- 是否使用代理；
+- 是否打开/关闭任何浏览器标签页；
+- 下载文件：通常为 `none`；
+- 生成文件：通常为 `none`；
+- 配置/环境变化：通常为 `none`。

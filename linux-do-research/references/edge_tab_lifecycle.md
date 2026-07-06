@@ -1,72 +1,72 @@
-# Edge Tab Lifecycle For LINUX DO Research
+# LINUX DO 研究的 Edge 标签页生命周期
 
-Use this reference before controlling the browser for LINUX DO. Browser control is the fallback stage of the same `linux-do-research` skill, not the default path for ordinary searches.
+控制浏览器处理 LINUX DO 前使用此参考文档。浏览器控制是同一个 `linux-do-research` 技能的兜底阶段，不是普通搜索的默认路径。
 
-## Browser Selection
+## 浏览器选择
 
-- Default to Microsoft Edge.
-- Do not use Chrome unless the user explicitly requests Chrome.
-- If the available automation module path contains `chrome`, still verify the actual controlled tabs are Edge tabs. Plugin package names can be misleading.
-- Do not use browser fallback until the network-first pass has produced a concrete evidence gap, unless the user explicitly asked for an existing browser tab, bookmarks, or current-tab work.
+- 默认使用 Microsoft Edge。
+- 除非用户明确要求 Chrome，否则不要使用 Chrome。
+- 如果可用自动化模块路径包含 `chrome`，仍要确认实际控制的标签页是 Edge 标签页。插件包名可能误导。
+- 除非用户明确要求现有浏览器标签页、收藏或当前标签页工作，否则在网络优先阶段产生具体证据缺口前，不要使用浏览器兜底。
 
-## Initial Audit
+## 初始审计
 
-Before reading:
+读取前：
 
-1. List open browser tabs via the official browser extension.
-2. Record each relevant tab's id, title, and URL.
-3. Identify the user-owned target tab:
-   - user gave exact URL;
-   - user gave title substring, for example "第二批";
-   - page title and URL match the request.
-4. Prefer claiming that tab over opening a new tab.
+1. 通过官方浏览器扩展列出打开的浏览器标签页。
+2. 记录每个相关标签页的 id、标题和 URL。
+3. 识别用户拥有的目标标签页：
+   - 用户给出了精确 URL；
+   - 用户给出了标题子串，例如“第二批”；
+   - 页面标题和 URL 匹配请求。
+4. 优先接管该标签页，而不是打开新标签页。
 
-Never close a user-owned tab solely because you claimed it for automation.
+不要仅仅因为接管了用户标签页用于自动化，就关闭它。
 
-## Temporary Tab Registry
+## 临时标签页登记
 
-When a new tab is necessary, internally record:
+当必须打开新标签页时，在内部记录：
 
-- tab id;
-- purpose;
-- requested URL;
-- final URL;
-- final title;
-- whether closed;
-- any error;
-- why the tab was needed.
+- tab id；
+- 用途；
+- 请求 URL；
+- 最终 URL；
+- 最终标题；
+- 是否已关闭；
+- 任何错误；
+- 为什么需要该标签页。
 
-Examples of valid temporary tab purposes:
+有效临时标签页用途示例：
 
-- read cloaked floors 6-8 at `/7`;
-- verify floors 9-15 at `/10`;
-- read a linked tutorial topic;
-- resolve a forum upload short URL to a CDN URL.
+- 在 `/7` 读取被 cloaked 的 6-8 楼；
+- 在 `/10` 验证 9-15 楼；
+- 读取链接的教程主题；
+- 将论坛上传短 URL 解析为 CDN URL。
 
-Do not create many tabs in parallel unless the user explicitly asks and tab cleanup is manageable. For most topic reads, one temporary tab at a time is safer.
+除非用户明确要求且标签页清理可管理，否则不要并行创建很多标签页。对大多数主题读取，一次一个临时标签页更安全。
 
-## Closing Rules
+## 关闭规则
 
-Only close a tab when all are true:
+只有当以下条件全部满足时，才关闭标签页：
 
-1. The tab id is in the current task's temporary tab registry.
-2. The URL/title still match the recorded purpose.
-3. The tab is no longer needed.
-4. Closing it will not remove the user's original target tab.
+1. tab id 在当前任务的临时标签页登记中。
+2. URL/标题仍匹配记录的用途。
+3. 标签页不再需要。
+4. 关闭它不会移除用户原始目标标签页。
 
-If close returns but the tab still appears in a stale list, perform one independent open-tab audit. If the tab is truly gone, do nothing. If it remains and still matches the recorded temporary tab, close it once more.
+如果 close 返回后，标签页仍出现在陈旧列表中，执行一次独立的打开标签页审计。如果标签页确实已消失，就不再操作。如果仍存在且仍匹配记录的临时标签页，再关闭一次。
 
-Never close:
+永远不要关闭：
 
-- tabs that existed before the task and were not explicitly assigned for closure;
-- ambiguous tabs;
-- unrelated user tabs;
-- browser/system/extension tabs;
-- another agent's or another session's tabs.
+- 任务开始前已存在且未明确指定关闭的标签页；
+- 归属不明的标签页；
+- 无关用户标签页；
+- 浏览器/系统/扩展标签页；
+- 另一个 agent 或另一个会话的标签页。
 
-## Official Extension Pattern
+## 官方扩展模式
 
-Typical Node REPL setup:
+典型 Node REPL 初始化：
 
 ```js
 var pluginRoot = "C:/Users/Wes/.codex/plugins/cache/openai-bundled/chrome/26.602.40724";
@@ -76,49 +76,49 @@ globalThis.browser = await agent.browsers.get("extension");
 var tabs = await browser.user.openTabs();
 ```
 
-Do not navigate browser/plugin tabs to LINUX DO `.json` topic URLs such as `https://linux.do/t/topic/<id>.json`; use normal topic pages and topic-position pages, then extract DOM-visible posts.
+不要把浏览器/插件标签页导航到 LINUX DO `.json` 主题 URL，例如 `https://linux.do/t/topic/<id>.json`；使用普通主题页和主题位置页，然后提取 DOM 可见帖子。
 
-Claim an existing tab:
+接管现有标签页：
 
 ```js
 var tab = await browser.user.claimTab("<tab-id>");
 ```
 
-Create a temporary tab:
+创建临时标签页：
 
 ```js
 var temp = await browser.tabs.new();
 await temp.goto("https://linux.do/t/topic/123/10");
 ```
 
-Close a known temporary tab:
+关闭已知临时标签页：
 
 ```js
 await temp.close();
 ```
 
-## Read-Only Page Scope Limits
+## 只读页面作用域限制
 
-In the official plugin, `tab.playwright.evaluate(...)` is read-only and may not expose normal browser APIs such as `fetch`, `XMLHttpRequest`, `NodeFilter`, or full `performance`.
+在官方插件中，`tab.playwright.evaluate(...)` 是只读的，并且可能不暴露普通浏览器 API，例如 `fetch`、`XMLHttpRequest`、`NodeFilter` 或完整 `performance`。
 
-Prefer DOM extraction inside `evaluate`. If network JSON access fails in page scope, do not assume the website is down; switch to DOM/topic-position extraction.
+优先在 `evaluate` 内做 DOM 提取。如果页面作用域的网络 JSON 访问失败，不要假设网站宕机；改用 DOM/主题位置提取。
 
-## User Updates
+## 给用户的进度更新
 
-For long reads, tell the user:
+长时间读取时，告诉用户：
 
-- which existing tab you claimed;
-- why a temporary tab is needed;
-- when the temporary tab is closed;
-- whether coverage is complete or still has gaps.
+- 接管了哪个现有标签页；
+- 为什么需要临时标签页；
+- 临时标签页何时关闭；
+- 覆盖是否完整，还是仍有缺口。
 
-Avoid saying "done" while tabs remain un-audited.
+标签页尚未审计前，避免说“完成”。
 
-## Final Tab Report
+## 最终标签页报告
 
-Final response must include:
+最终答复必须包含：
 
-- user-owned tabs retained;
-- temporary tabs opened and closed;
-- tabs left open and why;
-- any failed close attempts and follow-up audit result.
+- 保留的用户拥有标签页；
+- 打开并关闭的临时标签页；
+- 留开的标签页及原因；
+- 任何关闭失败尝试及后续审计结果。

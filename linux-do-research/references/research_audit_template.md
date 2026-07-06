@@ -1,110 +1,110 @@
-# LINUX DO Research Audit Template
+# LINUX DO 研究审计模板
 
-Use this template internally while reading LINUX DO content. It prevents overclaiming and makes final reporting precise.
+读取 LINUX DO 内容时在内部使用此模板。它防止过度声称，并让最终报告更精确。
 
-## Scope
-
-```text
-User request:
-Target tab/title:
-Target URL(s):
-Scope requested:
-  [ ] network search/readers first
-  [ ] bookmarks page
-  [ ] specific topic
-  [ ] all visible floors
-  [ ] all replies/floors
-  [ ] linked tutorials
-  [ ] attachments/downloads
-  [ ] derived deliverable
-Out of scope or deferred:
-```
-
-## Network Pass
+## 范围
 
 ```text
-Queries used:
-Proxy used:
-Direct URLs tried:
-Reader URLs tried:
-Topic-position URLs tried:
-Network JSON tried:
-Network coverage:
-Network gaps requiring browser fallback:
+用户请求：
+目标标签页/标题：
+目标 URL：
+请求范围：
+  [ ] 网络搜索/reader 优先
+  [ ] 收藏页
+  [ ] 指定主题
+  [ ] 所有可见楼层
+  [ ] 所有回复/楼层
+  [ ] 链接教程
+  [ ] 附件/下载
+  [ ] 派生交付物
+超出范围或延后：
 ```
 
-Do not treat search snippets as proof. Record original topic text or mark the claim unresolved.
-
-## Browser Tabs
+## 网络阶段
 
 ```text
-Initial open tabs:
-id | title | url | ownership
-
-Claimed existing tabs:
-id | title | url | reason
-
-Temporary tabs created:
-id | purpose | requested_url | final_url | final_title | closed | evidence
-
-Final open tabs:
-id | title | url | retained_reason
+使用的查询：
+是否使用代理：
+尝试过的直连 URL：
+尝试过的 Reader URL：
+尝试过的主题位置 URL：
+尝试过的网络 JSON：
+网络覆盖：
+需要浏览器兜底的网络缺口：
 ```
 
-Ownership values:
+不要把搜索摘要当证据。记录原始主题文本，或把结论标为未解决。
+
+## 浏览器标签页
+
+```text
+初始打开标签页：
+id | 标题 | URL | 归属
+
+接管的现有标签页：
+id | 标题 | URL | 原因
+
+创建的临时标签页：
+id | 用途 | 请求 URL | 最终 URL | 最终标题 | 已关闭 | 证据
+
+最终打开标签页：
+id | 标题 | URL | 保留原因
+```
+
+归属值：
 
 - `user-owned`
 - `task-created`
 - `ambiguous`
 
-Only close `task-created` tabs with matching URL/title evidence.
+只关闭 URL/标题证据匹配的 `task-created` 标签页。
 
-Do not navigate browser/plugin tabs to LINUX DO topic `.json` URLs. If browser fallback is required, use normal topic pages and topic-position URLs.
+不要把浏览器/插件标签页导航到 LINUX DO 主题 `.json` URL。如果需要浏览器兜底，使用普通主题页和主题位置 URL。
 
-## Bookmark Coverage
+## 收藏覆盖
 
 ```text
-Bookmarks source URL:
-Extraction method:
-Total visible bookmarks:
+收藏来源 URL：
+提取方法：
+可见收藏总数：
 
-bookmark_index | title | url | category/tags | excerpt | selected? | reason | status
+收藏索引 | 标题 | URL | 分类/标签 | 摘要 | 已选择？ | 原因 | 状态
 ```
 
-Status values:
+状态值：
 
 - `read`
 - `skipped-out-of-scope`
 - `deferred`
 - `failed`
 
-Never skip old bookmarks merely because they look old unless the user authorized filtering.
+除非用户授权过滤，否则不要因为旧收藏看起来旧就跳过。
 
-## Topic Coverage
-
-```text
-Topic URL:
-Title:
-Expected posts/highest floor:
-Extraction methods tried:
-  [ ] topic JSON
-  [ ] current DOM
-  [ ] temporary /floor tab
-  [ ] other
-
-Floors read:
-Missing floors:
-Gaps closed by:
-Remaining gaps:
-```
-
-Floor table:
+## 主题覆盖
 
 ```text
-floor | author | extracted_from | text_summary | links | attachments | warnings | actionability
+主题 URL：
+标题：
+预期帖子/最高楼层：
+尝试过的提取方法：
+  [ ] 主题 JSON
+  [ ] 当前 DOM
+  [ ] 临时 /floor 标签页
+  [ ] 其他
+
+已读楼层：
+缺失楼层：
+缺口由什么补齐：
+剩余缺口：
 ```
 
-Actionability values:
+楼层表：
+
+```text
+楼层 | 作者 | 提取来源 | 文本摘要 | 链接 | 附件 | 警告 | 可操作性
+```
+
+可操作性值：
 
 - `instruction`
 - `warning`
@@ -113,13 +113,13 @@ Actionability values:
 - `question`
 - `noise/thanks`
 
-## Link Coverage
+## 链接覆盖
 
 ```text
-source_floor | link_text | url | action | result | temp_tab_id | tab_closed
+来源楼层 | 链接文本 | URL | 动作 | 结果 | 临时标签页 ID | 标签页已关闭
 ```
 
-Action values:
+动作值：
 
 - `opened-read`
 - `downloaded`
@@ -129,55 +129,55 @@ Action values:
 - `deferred`
 - `failed`
 
-## Attachment Coverage
+## 附件覆盖
 
 ```text
-source_floor | visible_name | visible_size | forum_url | resolved_url | local_path | bytes | inspected | notes
+来源楼层 | 可见名称 | 可见大小 | 论坛 URL | 解析 URL | 本地路径 | 字节数 | 已检查 | 笔记
 ```
 
-Inspection summary:
+检查摘要：
 
 ```text
-archive_path:
-entry_count:
-json_entry_count:
-format:
-top_level_keys:
-credential_keys:
-missing_required_fields:
-secret_values_printed: no
+归档路径：
+条目数：
+JSON 条目数：
+格式：
+顶层键：
+凭据键：
+缺失必需字段：
+是否打印秘密值：no
 ```
 
-## Findings
+## 发现
 
-Separate conclusions by confidence:
+按置信度区分结论：
 
 ```text
-Verified facts:
+已验证事实：
 - ...
 
-Inferences:
+推断：
 - ...
 
-Warnings from source:
+来源警告：
 - ...
 
-Unresolved:
+未解决：
 - ...
 ```
 
-## Final Report Checklist
+## 最终报告清单
 
-Before answering:
+答复前：
 
-- [ ] network methods and proxy/direct path are reported;
-- [ ] no temporary tabs remain open;
-- [ ] user-owned tabs were not closed;
-- [ ] downloads are listed with absolute paths;
-- [ ] generated files are listed with absolute paths;
-- [ ] coverage is stated exactly;
-- [ ] unread links/floors/bookmarks are disclosed;
-- [ ] no cookies/localStorage/sessionStorage were extracted;
-- [ ] no forum mutation was performed;
-- [ ] cleanup actions are reported with evidence;
-- [ ] if subagents were used, their audit summaries are integrated.
+- [ ] 已报告网络方法和代理/直连路径；
+- [ ] 没有临时标签页仍保持打开；
+- [ ] 未关闭用户拥有的标签页；
+- [ ] 下载内容已用绝对路径列出；
+- [ ] 生成文件已用绝对路径列出；
+- [ ] 覆盖情况已精确说明；
+- [ ] 未读链接/楼层/收藏已披露；
+- [ ] 未提取 cookies/localStorage/sessionStorage；
+- [ ] 未执行论坛状态修改；
+- [ ] 清理行为已带证据报告；
+- [ ] 如果使用了子代理，已整合其审计摘要。

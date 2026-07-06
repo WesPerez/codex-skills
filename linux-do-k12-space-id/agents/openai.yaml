@@ -1,4 +1,4 @@
 interface:
-  display_name: "LINUX DO K12 Space IDs"
-  short_description: "Fast source-marked K12 workspace ID search"
-  default_prompt: "Use $linux-do-k12-space-id to collect recent LINUX DO K12 workspace IDs with sources."
+  display_name: "LINUX DO K12 空间 ID"
+  short_description: "快速搜索带来源的 K12 workspace ID"
+  default_prompt: "使用 $linux-do-k12-space-id 收集近期 LINUX DO K12 workspace ID，并附上来源。"

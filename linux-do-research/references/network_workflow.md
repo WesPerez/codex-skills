@@ -1,27 +1,27 @@
-# Unified Network-First Workflow For LINUX DO
+# LINUX DO 统一网络优先工作流
 
-Use this reference for the network-first pass of LINUX DO research. Treat it as the default path before any browser-plugin extraction.
+用于 LINUX DO 研究的网络优先阶段。在任何浏览器插件提取前，把它作为默认路径。
 
-## Proxy And Timeouts
+## 代理与超时
 
-For LINUX DO and `r.jina.ai` reader/search work, start with the local proxy immediately. Do not waste the first 20-30 seconds on direct requests that usually time out in this environment.
+对 LINUX DO 和 `r.jina.ai` reader/search 工作，立即从本地代理开始。不要把最初 20-30 秒浪费在此环境中通常会超时的直连请求上。
 
-Use per-command proxy settings and short timeouts. Do not persist global proxy variables.
+使用每条命令自己的代理设置和短超时。不要持久化全局代理变量。
 
-PowerShell examples:
+PowerShell 示例：
 
 ```powershell
 curl.exe -x http://127.0.0.1:10808 -L --max-time 30 "https://r.jina.ai/http://r.jina.ai/http://linux.do/t/topic/2508374"
 curl.exe -x http://127.0.0.1:10808 -L --max-time 30 -A "Mozilla/5.0" "https://linux.do/t/topic/2508374.json"
 ```
 
-If the local proxy is absent or fails with a proxy-connection error, make one short direct retry, usually `--max-time 15`, then move to another proxy-backed/search-index path. Record which path worked.
+如果本地代理不存在，或因代理连接错误失败，做一次短直连重试，通常使用 `--max-time 15`，然后转到另一个代理支持/搜索索引路径。记录哪条路径可用。
 
-Do not persist global `HTTP_PROXY` or `HTTPS_PROXY`.
+不要持久化全局 `HTTP_PROXY` 或 `HTTPS_PROXY`。
 
-## Discovery Queries
+## 发现查询
 
-Use search for discovery, not proof. Good patterns:
+搜索用于发现，不用于证明。好用模式：
 
 ```text
 site:linux.do K12 空间ID 被封 下车
@@ -31,105 +31,105 @@ site:linux.do "K12灵车想跑路"
 site:linux.do workspace deactivated K12
 ```
 
-Search HTML may be noisy or CAPTCHA-gated. If output is only a search app shell, do not treat it as evidence.
+搜索 HTML 可能很嘈杂或被 CAPTCHA 拦住。如果输出只是搜索应用外壳，不要把它当证据。
 
-## Reading Topics
+## 读取主题
 
-Try topic reader URLs first:
+先尝试主题 reader URL：
 
 ```text
 https://r.jina.ai/http://r.jina.ai/http://linux.do/t/topic/<topic_id>
 https://r.jina.ai/http://r.jina.ai/http://linux.do/t/topic/<topic_id>/<floor>
 ```
 
-Use position URLs to fill gaps:
+使用位置 URL 补齐缺口：
 
-- `/7` for early missing floors;
-- `/14`, `/23`, `/30` for later ranges;
-- the final visible floor number if the reader says "Skip to last reply".
+- `/7` 用于早期缺失楼层；
+- `/14`、`/23`、`/30` 用于后续范围；
+- 如果 reader 显示 “Skip to last reply”，使用最终可见楼层号。
 
-Track:
+跟踪：
 
 ```text
-topic_url | title | visible_count/highest_floor | floors_read | floors_placeholder_only | gaps
+主题 URL | 标题 | 可见数量/最高楼层 | 已读楼层 | 仅占位楼层 | 缺口
 ```
 
-Never claim all floors were read unless the expected/highest floor was known and every floor was extracted with body text or explicitly accounted for.
+除非已知预期/最高楼层，并且每个楼层都提取到正文或被明确说明，否则永远不要声称已读取所有楼层。
 
-## Evidence Standard
+## 证据标准
 
-Final claims should be grounded in original post text, not search summaries. Prefer:
+最终结论应基于原帖文本，而不是搜索摘要。优先包含：
 
-- exact title and URL;
-- quoted sentence or short passage;
-- floor number or author/date when available;
-- statement of whether the topic was complete or partial.
+- 精确标题和 URL；
+- 引用句子或短段落；
+- 可用时给出楼层号或作者/日期；
+- 说明主题读取是完整还是部分。
 
-Separate:
+区分：
 
-- verified facts: directly quoted or observed;
-- inferences: your synthesis from multiple facts;
-- unresolved gaps: missing floors, blocked attachment, stale reader output.
+- 已验证事实：直接引用或观察到的内容；
+- 推断：你基于多个事实的综合判断；
+- 未解决缺口：缺失楼层、被阻断附件、陈旧 reader 输出。
 
-## Attachments
+## 附件
 
-Direct forum upload links often fail with Cloudflare:
+论坛直接上传链接经常因 Cloudflare 失败：
 
 ```text
 https://linux.do/uploads/short-url/<id>.txt
 ```
 
-Try:
+尝试：
 
 ```powershell
 curl.exe -x http://127.0.0.1:10808 -L --max-time 30 -A "Mozilla/5.0" "<forum-upload-url>"
 curl.exe -x http://127.0.0.1:10808 -L --max-time 30 "https://r.jina.ai/http://r.jina.ai/http://linux.do/uploads/short-url/<id>.txt"
 ```
 
-If both fail, report the visible filename, visible size, source topic/floor, methods tried, and that browser escalation is required to resolve it. Do not say the attachment does not exist.
+如果两者都失败，报告可见文件名、可见大小、来源主题/楼层、尝试过的方法，以及需要浏览器升级来解析它。不要说附件不存在。
 
-Download only when the attachment is necessary. Use explicit output paths and record bytes. If the file may contain tokens/accounts, inspect only structure, counts, keys, and presence booleans.
+只在附件对任务必要时下载。使用明确输出路径并记录字节数。如果文件可能包含 token/账号，只检查结构、数量、键和存在性布尔值。
 
-## When Network Is Enough
+## 网络何时足够
 
-Network-only research is enough when:
+以下情况网络研究已经足够：
 
-- original topic body and relevant replies are readable;
-- coverage is complete or gaps are irrelevant to the answer;
-- key links/attachments are either read or not needed;
-- the conclusion can be supported with direct quotes.
+- 原始主题正文和相关回复可读；
+- 覆盖完整，或缺口与答案无关；
+- 关键链接/附件已读取或不需要；
+- 结论可由直接引用支撑。
 
-## When To Escalate
+## 何时升级
 
-Escalate to browser fallback when:
+在以下情况升级到浏览器兜底：
 
-- the user asked for every floor and reader output has placeholders;
-- a key attachment/link is blocked;
-- screenshots contain the only important evidence and cannot be interpreted from alt text;
-- forum content appears private or reader output conflicts with other evidence;
-- the answer would otherwise rest on summaries or guesses.
+- 用户要求每个楼层，而 reader 输出有占位符；
+- 关键附件/链接被阻断；
+- 截图包含唯一重要证据，且无法从 alt text 解释；
+- 论坛内容看起来私有，或 reader 输出与其他证据冲突；
+- 否则答案会依赖摘要或猜测。
 
-Before escalating, write down:
+升级前写下：
 
-- queries used;
-- topic URLs and floor-position URLs tried;
-- proxy/direct path used;
-- floors and links already covered;
-- exact gaps that require browser help.
+- 使用过的查询；
+- 尝试过的主题 URL 和楼层位置 URL；
+- 使用的代理/直连路径；
+- 已覆盖的楼层和链接；
+- 需要浏览器帮助的精确缺口。
 
-## Browser Escalation Guardrail
+## 浏览器升级护栏
 
-When the browser-plugin fallback is used, do not try to read LINUX DO by navigating the browser to `.json` topic URLs such as:
+使用浏览器插件兜底时，不要通过导航到 `.json` 主题 URL 来读取 LINUX DO，例如：
 
 ```text
 https://linux.do/t/topic/<topic_id>.json
 ```
 
-Those browser navigations are commonly blocked by Cloudflare. Use the normal topic URL and topic-position URLs instead:
+这些浏览器导航常被 Cloudflare 阻断。改用普通主题 URL 和主题位置 URL：
 
 ```text
 https://linux.do/t/topic/<topic_id>
 https://linux.do/t/topic/<topic_id>/<floor>
 ```
 
-Then extract DOM-visible posts and open targeted position pages to fill missing floors. Shell/network JSON may still be tried during the network pass when reachable without browser credentials; the prohibition is specifically for browser/plugin fallback navigation.
+然后提取 DOM 可见帖子，并打开定向位置页面补齐缺失楼层。网络阶段在无需浏览器凭据可达时仍可尝试 shell/network JSON；禁止项专门针对浏览器/插件兜底导航。

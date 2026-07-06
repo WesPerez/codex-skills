@@ -1,85 +1,85 @@
-# LINUX DO Attachments And Linked Resources
+# LINUX DO 附件与链接资源
 
-Use this reference when a LINUX DO topic includes upload links, zip files, images, tutorials, GitHub releases, or other linked resources.
+当 LINUX DO 主题包含上传链接、zip 文件、图片、教程、GitHub releases 或其他链接资源时，使用此参考文档。
 
-## Attachment Discovery
+## 附件发现
 
-During the network-first pass, try public reader/direct download methods before browser fallback. Use browser fallback only when a relevant attachment/link cannot be resolved with enough evidence through network methods.
+在网络优先阶段，先尝试公开 reader/直接下载方法，再使用浏览器兜底。只有相关附件/链接无法通过网络方法解析出足够证据时，才使用浏览器兜底。
 
-Extract links from relevant posts:
+从相关帖子中提取链接：
 
-- `a[href]` text and URL;
-- visible filename;
-- visible size, for example `195.2 KB`;
-- source floor number;
-- surrounding warning text.
+- `a[href]` 文本和 URL；
+- 可见文件名；
+- 可见大小，例如 `195.2 KB`；
+- 来源楼层号；
+- 周围警告文本。
 
-Prioritize:
+优先处理：
 
-- `.zip`, `.json`, `.txt`, `.yaml`, `.md`;
-- tutorial/source topic links;
-- GitHub release links;
-- links explicitly introduced as "教程", "配置", "来源", "密码", "上一个帖子", "删除不可用账号".
+- `.zip`、`.json`、`.txt`、`.yaml`、`.md`；
+- 教程/来源主题链接；
+- GitHub release 链接；
+- 明确以“教程”、“配置”、“来源”、“密码”、“上一个帖子”、“删除不可用账号”引出的链接。
 
-Ignore or deprioritize:
+忽略或降低优先级：
 
-- user profile links;
-- avatar/images unless the image contains instructions;
-- category navigation;
-- repeated reaction/thanks links.
+- 用户 profile 链接；
+- 头像/图片，除非图片包含说明；
+- 分类导航；
+- 重复反应/感谢链接。
 
-## Cloudflare And Short URLs
+## Cloudflare 与短 URL
 
-Direct shell requests to `https://linux.do/...` can return `403 Forbidden`.
+直接 shell 请求 `https://linux.do/...` 可能返回 `403 Forbidden`。
 
-Do not interpret that as the attachment being unavailable. Use Edge to resolve the forum short URL because the logged-in browser session may be needed for the redirect.
+不要把它解释为附件不可用。使用 Edge 解析论坛短 URL，因为重定向可能需要登录浏览器会话。
 
-When using Edge/browser fallback, do not open topic `.json` URLs to find attachments. Open the normal topic or topic-position page and extract visible links from the DOM.
+使用 Edge/浏览器兜底时，不要打开主题 `.json` URL 来找附件。打开普通主题或主题位置页面，并从 DOM 提取可见链接。
 
-Typical flow:
+典型流程：
 
-1. Open a temporary Edge tab to the forum upload short URL.
-2. Let it redirect or fail as a download navigation.
-3. Capture the final CDN URL if visible, for example `https://cdn3.ldstatic.com/original/...zip`.
-4. Close the temporary tab.
-5. If the final CDN URL does not require cookies, download it with a normal HTTP client.
-6. Verify the downloaded file size against the topic's visible size.
+1. 打开一个临时 Edge 标签页到论坛上传短 URL。
+2. 让它重定向，或作为下载导航失败。
+3. 捕获可见的最终 CDN URL，例如 `https://cdn3.ldstatic.com/original/...zip`。
+4. 关闭临时标签页。
+5. 如果最终 CDN URL 不需要 cookies，用普通 HTTP client 下载。
+6. 对照主题可见大小校验下载文件大小。
 
-Do not extract cookies to make curl work.
+不要提取 cookies 来让 curl 可用。
 
-## Download Handling
+## 下载处理
 
-Before downloading:
+下载前：
 
-- check whether the file already exists;
-- avoid overwriting unrelated user files;
-- choose a clear output path;
-- record whether the download came from Edge resolution or direct URL.
+- 检查文件是否已存在；
+- 避免覆盖无关用户文件；
+- 选择清晰的输出路径；
+- 记录下载来自 Edge 解析还是直接 URL。
 
-After downloading:
+下载后：
 
-- record absolute path;
-- record byte size and timestamp;
-- inspect archive structure if it is a zip;
-- inspect JSON keys and counts without printing secrets;
-- keep the file unless the user asks to clean it or it is clearly a temporary artifact created only for internal processing.
+- 记录绝对路径；
+- 记录字节大小和时间戳；
+- 如果是 zip，检查归档结构；
+- 检查 JSON 键和数量，不打印秘密；
+- 除非用户要求清理，或它明确只是为内部处理创建的临时产物，否则保留文件。
 
-Do not delete downloads by broad pattern. Cleanup must follow the user's cleanup safety rules.
+不要用宽泛模式删除下载。清理必须遵循用户的清理安全规则。
 
-## Archive Inspection
+## 归档检查
 
-Use structured zip APIs, not ad hoc byte/string scans.
+使用结构化 zip API，不要用临时字节/字符串扫描。
 
-For each zip, report:
+对每个 zip，报告：
 
-- number of entries;
-- number of JSON entries;
-- sample entry name;
-- top-level keys of sample JSON;
-- whether tokens are present as booleans, not values;
-- whether it is a bundle or single-account collection.
+- 条目数量；
+- JSON 条目数量；
+- 样例条目名；
+- 样例 JSON 顶层键；
+- token 是否存在，用布尔值而不是值；
+- 它是 bundle 还是单账号集合。
 
-Secret-safe sample output:
+安全样例输出：
 
 ```text
 JsonEntries: 100
@@ -88,56 +88,56 @@ HasAccessToken: true
 HasRefreshToken: false
 ```
 
-## Linked Tutorial Handling
+## 链接教程处理
 
-When a linked tutorial is relevant:
+当链接教程相关时：
 
-1. Open one temporary tab.
-2. Extract main post and high-signal links.
-3. Summarize the actionable steps.
-4. Record what the tutorial does and does not apply to.
-5. Close the temporary tab.
+1. 打开一个临时标签页。
+2. 提取主帖和高信号链接。
+3. 总结可执行步骤。
+4. 记录该教程适用和不适用的范围。
+5. 关闭临时标签页。
 
-Example distinction:
+示例区分：
 
-- A CPA tutorial may explain running CliProxyAPI locally.
-- That does not mean a Sub2API server plan must deploy CPA.
-- State the relationship explicitly.
+- CPA 教程可能解释如何在本地运行 CliProxyAPI。
+- 这不表示 Sub2API 服务器方案必须部署 CPA。
+- 明确说明两者关系。
 
-## Link Coverage Report
+## 链接覆盖报告
 
-For each important link, track:
+对每个重要链接，跟踪：
 
 ```text
-source_floor | link_text | url | action | result | tab_status
+来源楼层 | 链接文本 | URL | 动作 | 结果 | 标签页状态
 ```
 
-Possible actions:
+可能动作：
 
-- read topic;
-- downloaded attachment;
-- resolved CDN URL;
-- skipped as profile/navigation;
-- deferred because out of scope.
+- 读取主题；
+- 下载附件；
+- 解析 CDN URL；
+- 跳过 profile/navigation；
+- 因超出范围而延后。
 
-Final answers should mention skipped high-signal links if they remain unread.
+最终答案应提及仍未读取的高信号链接。
 
-## Safety Boundaries
+## 安全边界
 
-Allowed:
+允许：
 
-- read public/visible forum content through Edge;
-- resolve attachment redirects;
-- download attachments needed for the user's task;
-- inspect local downloaded files;
-- create derived summaries or import kits.
+- 通过 Edge 读取公开/可见论坛内容；
+- 解析附件重定向；
+- 下载用户任务所需附件；
+- 检查本地下载文件；
+- 创建派生总结或导入 kit。
 
-Not allowed without explicit authorization:
+未经明确授权不允许：
 
-- posting replies;
-- liking/bookmarking/unbookmarking;
-- uploading files;
-- reading browser cookie stores;
-- extracting localStorage/sessionStorage tokens;
-- mass downloading unrelated bookmarks;
-- deleting user downloads.
+- 发帖回复；
+- 点赞/收藏/取消收藏；
+- 上传文件；
+- 读取浏览器 cookie stores；
+- 提取 localStorage/sessionStorage token；
+- 批量下载无关收藏；
+- 删除用户下载。

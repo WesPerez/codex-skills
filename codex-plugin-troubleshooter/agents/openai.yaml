@@ -1,4 +1,4 @@
 interface:
-  display_name: "Codex Plugin Troubleshooter"
-  short_description: "Diagnose Codex browser/plugin tool issues"
-  default_prompt: "Use $codex-plugin-troubleshooter to diagnose why Codex Chrome, Browser Use, Computer Use, node_repl, or app connector tools are missing or broken."
+  display_name: "Codex 插件排障"
+  short_description: "诊断 Codex 浏览器/插件工具问题"
+  default_prompt: "使用 $codex-plugin-troubleshooter 诊断为什么 Codex Chrome、Browser Use、Computer Use、node_repl 或应用连接器工具缺失或损坏。"

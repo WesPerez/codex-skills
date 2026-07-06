@@ -1,62 +1,62 @@
-# K12/Sub2API Full Workflow
+# K12/Sub2API 完整工作流
 
-Use this reference for end-to-end K12 account package handling. It is based on the verified workflow from LINUX DO K12 packages and Sub2API imports.
+端到端处理 K12 账号包时使用此参考文档。它基于已经验证过的 LINUX DO K12 包和 Sub2API 导入流程。
 
-## Operating Principles
+## 操作原则
 
-- Optimize for a disabled/non-technical user: produce a kit or prompt that another Codex can run on the server with minimal manual action.
-- Be honest about coverage. Do not say "all bookmarks" or "all floors" were read unless coverage was recorded and gaps were closed.
-- Treat OAuth account JSON as credentials.
-- Redact access tokens, id tokens, refresh tokens, session tokens, cookies, and bearer tokens in logs and final output.
-- Do not read browser cookies, localStorage, session storage, or profile files to obtain credentials.
-- Do not post to forums, click "refresh token", batch refresh accounts, or mutate remote services without explicit authorization.
-- Do not import every package just because it exists. Prefer staged imports and validation.
+- 为不方便操作或非技术用户优化：产出 kit 或 prompt，让另一台服务器上的 Codex 能用最少人工动作运行。
+- 如实报告覆盖情况。除非已经记录覆盖并补齐缺口，否则不要说“所有收藏”或“所有楼层”都已读取。
+- 把 OAuth 账号 JSON 当作凭据。
+- 在日志和最终输出中隐去 access token、id token、refresh token、session token、cookies 和 bearer token。
+- 不要读取浏览器 cookies、localStorage、session storage 或 profile 文件来获取凭据。
+- 未经明确授权，不要在论坛发帖、点击“refresh token”、批量刷新账号或修改远程服务。
+- 不要因为包存在就全部导入。优先分阶段导入和校验。
 
-## Source Intake
+## 来源接收
 
-For each candidate file or download:
+对每个候选文件或下载：
 
-1. Record absolute path, size, modification time, source URL/topic, and any password/notice from the source thread.
-2. Inspect zip structure with a structured zip reader.
-3. Inspect JSON keys, not token values.
-4. Count JSON entries and classify the source format.
-5. Identify explicit warnings from the source thread, especially "do not refresh token" or "small/random import" advice.
-6. Record whether this source overlaps with existing bundles by email and by account id. Do not treat email overlap alone as proof of a duplicate for CPA single-account zips.
+1. 记录绝对路径、大小、修改时间、来源 URL/topic，以及来源帖中的任何密码/说明。
+2. 使用结构化 zip 读取器检查 zip 结构。
+3. 检查 JSON 键，而不是 token 值。
+4. 统计 JSON 条目并分类来源格式。
+5. 识别来源帖中的明确警告，尤其是“不要刷新 token”或“小批量/随机导入”建议。
+6. 记录此来源与现有 bundle 在邮箱和 account id 上是否重叠。对于 CPA 单账号 zip，不要把邮箱重叠本身当成重复证明。
 
-Never rely on file name alone. Verify the inside shape.
+永远不要只依赖文件名。必须验证内部结构。
 
-## Known Source Lessons
+## 已知来源经验
 
-The previously verified package set had these conclusions:
+之前验证过的包集有这些结论：
 
-- `1334个-不要去刷新令牌.zip` was the best initial source.
-- Password/notice from its source thread included `密1122` and "不要刷新令牌".
-- The 1022 CPA package overlapped with the 1334 package and should not be imported together initially.
-- Outlook workspace creation was unreliable/dead, but downloaded OAuth credentials could still be importable.
-- One newer second batch topic `2527525` contained two 100-account CPA zip files:
+- `1334个-不要去刷新令牌.zip` 是最佳初始来源。
+- 来源帖的密码/说明包括 `密1122` 和“不要刷新令牌”。
+- 1022 CPA 包与 1334 包重叠，不应在初始阶段一起导入。
+- Outlook workspace 创建不可靠/失效，但已下载的 OAuth 凭据仍可能可导入。
+- 一个较新的第二批主题 `2527525` 包含两个 100 账号 CPA zip 文件：
   - `kxj_k12_batch_001_100_cpa.zip`
   - `kxj_k12_batch_002_100_cpa.zip`
-- The second batch had 200 unique Gmail accounts, no email overlap with the 1334 bundle, and no missing access tokens in the verified run.
-- A later `batch1.zip` example contained repeated emails with different account ids; those entries should be kept, not deduplicated by email.
-- A later `50个.zip` example contained 50 CPA JSON files and should be kept as 50 entries when building its bundle.
-- Replies in the second batch advised not importing everything at once. Use random/small slices.
+- 第二批有 200 个唯一 Gmail 账号，与 1334 bundle 没有邮箱重叠，验证运行中没有缺失 access token。
+- 后来的 `batch1.zip` 示例包含重复邮箱但 account id 不同；这些条目应保留，不按邮箱去重。
+- 后来的 `50个.zip` 示例包含 50 个 CPA JSON 文件，构建 bundle 时应保留为 50 个条目。
+- 第二批回复建议不要一次导入全部。使用随机/小切片。
 
-Do not assume these exact files exist in a future workspace. Re-verify every time.
+不要假设未来工作区中存在这些精确文件。每次都重新验证。
 
-## Bundle Strategy
+## Bundle 生成策略
 
-Create at least two classes of output when enough source material exists:
+当来源材料足够时，至少创建两类输出：
 
-1. Recommended bundle:
-   - high-confidence accounts only;
-   - intended as the first server import;
-   - small enough to test and recover from.
-2. Full or optional bundles:
-   - lower-confidence, newer, overlapping, or bulk packages;
-   - clearly marked as optional;
-   - imported only after recommended bundle works.
+1. Recommended bundle：
+   - 只包含高可信账号；
+   - 用作第一次服务器导入；
+   - 足够小，便于测试和恢复。
+2. Full 或 optional bundle：
+   - 可信度较低、更新、重叠或批量包；
+   - 清楚标为可选；
+   - 只有在 recommended bundle 可用后才导入。
 
-For volatile forum-shared K12 accounts, prefer a current-batch bundle and a small shuffled import:
+对论坛公开共享且易失的 K12 账号，优先使用当前批次 bundle 和打乱的小批量导入：
 
 ```bash
 export K12_BUNDLE="data/k12_sub2api_current_batch.json"
@@ -65,39 +65,39 @@ export K12_MAX_ACCOUNTS=10
 bash run_on_server.sh
 ```
 
-The exact `K12_MAX_ACCOUNTS` can be smaller for the first live test.
+首次线上测试时，`K12_MAX_ACCOUNTS` 可以更小。
 
-## Duplicate Handling Rules
+## 重复处理规则
 
-For CPA single-account zip files:
+对 CPA 单账号 zip 文件：
 
-- keep every JSON entry by default;
-- use the builder's no-deduplication mode unless the user explicitly asks otherwise;
-- report repeated emails and unique account-id counts;
-- preserve same-email entries when account ids differ.
+- 默认保留每个 JSON 条目；
+- 除非用户明确要求，否则使用 builder 的不去重模式；
+- 报告重复邮箱和唯一 account-id 数量；
+- account id 不同时保留同邮箱条目。
 
-For grouped bundle zips:
+对分组 bundle zip：
 
-- deduplicate cautiously across groups when building recommended/all bundles;
-- do not deduplicate only by `chatgpt_account_id` or `account_id`, because some K12 packages share one workspace/account id across many distinct users;
-- if unsure, preserve entries and explain the duplicate-risk rather than silently dropping them.
+- 构建 recommended/all bundle 时跨组谨慎去重；
+- 不要只按 `chatgpt_account_id` 或 `account_id` 去重，因为有些 K12 包让许多不同用户共享一个 workspace/account id；
+- 如果不确定，保留条目并解释重复风险，而不是静默丢弃。
 
-## Replacement Mode
+## 替换模式
 
-When the user says "delete previous accounts", "only add this batch", "只加入这一批", or equivalent:
+当用户说“delete previous accounts”、“only add this batch”、“只加入这一批”或等价表达时：
 
-1. Do not delete original downloads unless explicitly asked.
-2. Remove old generated bundle JSON/manifest files from the working kit's `data/` directory only after verifying they were produced by the current/previous kit workflow.
-3. Generate a new current-batch bundle, preferably named `data/k12_sub2api_current_batch.json`.
-4. Generate a matching manifest, preferably `data/k12_current_batch_manifest.json`.
-5. Update `run_on_server.sh` default `K12_BUNDLE` to the current-batch bundle.
-6. Update `README.md` and `SERVER_CODEX_PROMPT.md` so server-side Codex imports only the current batch by default.
-7. Rebuild the deliverable zip and verify it does not contain old batch bundle names.
-8. Report exactly what was deleted from the kit and what source archives were kept.
+1. 除非明确要求，不要删除原始下载。
+2. 只有在确认旧的生成 bundle JSON/manifest 文件由当前/之前的 kit 工作流产生后，才从工作 kit 的 `data/` 目录移除它们。
+3. 生成新的当前批次 bundle，推荐命名为 `data/k12_sub2api_current_batch.json`。
+4. 生成匹配的 manifest，推荐命名为 `data/k12_current_batch_manifest.json`。
+5. 更新 `run_on_server.sh` 默认 `K12_BUNDLE` 为当前批次 bundle。
+6. 更新 `README.md` 和 `SERVER_CODEX_PROMPT.md`，使服务器侧 Codex 默认只导入当前批次。
+7. 重建交付 zip，并确认其中不包含旧批次 bundle 名称。
+8. 精确报告从 kit 中删除了什么，以及保留了哪些源归档。
 
-## Validation Commands
+## 校验命令
 
-Use structured validation and do not print token values:
+使用结构化校验，不要打印 token 值：
 
 ```bash
 python scripts/import_sub2api_bundle.py \
@@ -106,7 +106,7 @@ python scripts/import_sub2api_bundle.py \
   --max-accounts 3
 ```
 
-For a second-batch or volatile package:
+对第二批或易失包：
 
 ```bash
 python scripts/import_sub2api_bundle.py \
@@ -117,16 +117,16 @@ python scripts/import_sub2api_bundle.py \
   --shuffle-seed 12345
 ```
 
-Expected preview summary:
+预期 preview 摘要：
 
-- `platforms` contains `openai`;
-- `plan_types` contains `k12`;
-- `missing_access_token` is `0`;
-- sample identities show emails/names only, not tokens.
+- `platforms` 包含 `openai`；
+- `plan_types` 包含 `k12`；
+- `missing_access_token` 为 `0`；
+- sample identities 只显示邮箱/name，不显示 token。
 
-## Server Kit Pattern
+## 服务器 Kit 模式
 
-Recommended directory shape:
+推荐目录结构：
 
 ```text
 k12-sub2api-kit/
@@ -146,47 +146,47 @@ k12-sub2api-kit/
     cpa_tutorial_summary.md
 ```
 
-`README.md` should explain human usage.
+`README.md` 应解释给人看的使用方式。
 
-`SERVER_CODEX_PROMPT.md` should tell the server-side Codex exactly what to do, in order, with secrets redacted in reports.
+`SERVER_CODEX_PROMPT.md` 应告诉服务器侧 Codex 按顺序准确执行什么，并在报告中隐去秘密。
 
-`run_on_server.sh` should:
+`run_on_server.sh` 应：
 
-- use `SUB2API_BASE_URL`, defaulting cautiously to localhost;
-- use `K12_BUNDLE` with a safe default;
-- support `K12_MAX_ACCOUNTS`;
-- support `K12_SHUFFLE` and a fixed `K12_SHUFFLE_SEED` so preview and execute select the same accounts;
-- run preview first, then execute.
+- 使用 `SUB2API_BASE_URL`，谨慎默认为 localhost；
+- 使用 `K12_BUNDLE` 并设置安全默认值；
+- 支持 `K12_MAX_ACCOUNTS`；
+- 支持 `K12_SHUFFLE` 和固定 `K12_SHUFFLE_SEED`，使 preview 和 execute 选择同一批账号；
+- 先运行 preview，再执行。
 
-## CPA Tutorial Relationship
+## CPA 教程关系
 
-The LINUX DO CPA tutorial teaches local CliProxyAPI use:
+LINUX DO CPA 教程讲的是本地 CliProxyAPI 使用方式：
 
-1. download CPA/CliProxyAPI;
-2. copy `config.example.yaml` to `config.yaml`;
-3. set `secret-key`;
-4. run CPA;
-5. log in at `http://localhost:8317/management.html#/login`;
-6. upload `.json` account files;
-7. create an API key;
-8. point Cherry Studio/Codex/OpenAI-compatible clients to `http://localhost:8317`.
+1. 下载 CPA/CliProxyAPI；
+2. 把 `config.example.yaml` 复制为 `config.yaml`；
+3. 设置 `secret-key`；
+4. 运行 CPA；
+5. 登录 `http://localhost:8317/management.html#/login`；
+6. 上传 `.json` 账号文件；
+7. 创建 API key；
+8. 把 Cherry Studio/Codex/OpenAI-compatible clients 指向 `http://localhost:8317`。
 
-For a Sub2API deployment, CPA is background knowledge. If the goal is Sub2API import, convert the JSON files into Sub2API bundles and import directly. Do not deploy CPA unless the user asks for CPA specifically.
+对 Sub2API 部署而言，CPA 是背景知识。如果目标是 Sub2API 导入，就把 JSON 文件转换成 Sub2API bundle 并直接导入。除非用户特别要求 CPA，否则不要部署 CPA。
 
-## Final Answer Requirements
+## 最终答复要求
 
-For K12/Sub2API work, always report:
+对 K12/Sub2API 工作，始终报告：
 
-- what sources were read and whether any bookmarks/floors remain unread;
-- downloaded files and their paths;
-- generated/modified files;
-- generated account counts;
-- duplicate/overlap counts;
-- missing token counts;
-- whether tokens were refreshed: normally `no`;
-- whether live import was executed: normally `no` unless explicitly authorized;
-- commands used for validation;
-- browser tabs opened/closed if browser was used;
-- cleanup performed or intentionally not performed;
-- running processes/services;
-- commit hash if any commit was created.
+- 读取了哪些来源，以及是否还有未读收藏/楼层；
+- 下载文件及其路径；
+- 生成/修改的文件；
+- 生成的账号数量；
+- 重复/重叠数量；
+- 缺失 token 数量；
+- 是否刷新 token：通常为 `no`；
+- 是否执行 live import：通常为 `no`，除非已明确授权；
+- 用于校验的命令；
+- 如果使用浏览器，报告打开/关闭的标签页；
+- 已执行或有意未执行的清理；
+- 运行中的进程/服务；
+- 如果创建了 commit，报告 commit hash。

@@ -1,4 +1,4 @@
 interface:
-  display_name: "K12 Check"
-  short_description: "Verify K12 workspace ID availability safely"
-  default_prompt: "Use $k12check to verify whether these K12 workspace IDs are available with the lowest-risk method."
+  display_name: "K12 检查"
+  short_description: "安全验证 K12 workspace ID 可用性"
+  default_prompt: "使用 $k12check 以最低风险方法验证这些 K12 workspace ID 是否可用。"
