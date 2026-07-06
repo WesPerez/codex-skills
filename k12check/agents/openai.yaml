@@ -1,0 +1,4 @@
+interface:
+  display_name: "K12 Check"
+  short_description: "Verify K12 workspace ID availability safely"
+  default_prompt: "Use $k12check to verify whether these K12 workspace IDs are available with the lowest-risk method."
