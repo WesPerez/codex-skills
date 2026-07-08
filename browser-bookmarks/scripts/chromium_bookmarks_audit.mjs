@@ -147,6 +147,27 @@ function directBookmarkBarUrlValues(rootObj) {
     .map((child) => String(child.url || ""));
 }
 
+function treeNodeSignature(node) {
+  if (!node) return null;
+  const base = {
+    type: String(node.type || ""),
+    name: String(node.name || ""),
+  };
+  if (node.type === "url") return { ...base, url: String(node.url || "") };
+  return {
+    ...base,
+    children: (node.children || []).map((child) => treeNodeSignature(child)),
+  };
+}
+
+function treeSignature(rootObj) {
+  const roots = {};
+  for (const rootName of Object.keys(rootObj.roots || {})) {
+    roots[rootName] = treeNodeSignature(rootObj.roots[rootName]);
+  }
+  return JSON.stringify(roots);
+}
+
 function summarize(file) {
   const rootObj = readBookmarks(file);
   const inventory = collect(rootObj);
@@ -164,6 +185,7 @@ function summarize(file) {
     topLevelBookmarkBar: topLevel(rootObj, "bookmark_bar"),
     directBookmarkBarUrls: directBookmarkBarUrls(rootObj),
     directBookmarkBarUrlValues: directBookmarkBarUrlValues(rootObj),
+    treeSignature: treeSignature(rootObj),
     checksum: checksum(rootObj),
     duplicateSamples: dupes.slice(0, 20),
     urlSet: new Set(inventory.urls.map((x) => x.url.toLowerCase())),
@@ -181,11 +203,12 @@ function compare(current, baseline) {
     missingFromCurrentSamples: missingFromCurrent.slice(0, 20).map(displayUrl),
     addedInCurrentSamples: addedInCurrent.slice(0, 20).map(displayUrl),
     directBookmarkBarUrlSequenceSame: JSON.stringify(currentDirect) === JSON.stringify(baselineDirect),
+    exactTreeAndOrderMatch: current.treeSignature === baseline.treeSignature,
   };
 }
 
 function stripInternal(summary) {
-  const { urlSet, directBookmarkBarUrlValues: _directBookmarkBarUrlValues, ...rest } = summary;
+  const { urlSet, directBookmarkBarUrlValues: _directBookmarkBarUrlValues, treeSignature: _treeSignature, ...rest } = summary;
   return rest;
 }
 
@@ -201,6 +224,7 @@ function printText(report) {
     console.log(`Missing vs baseline: ${report.compare.missingFromCurrentCount}`);
     console.log(`Added vs baseline: ${report.compare.addedInCurrentCount}`);
     console.log(`Direct bookmark bar URL sequence same: ${report.compare.directBookmarkBarUrlSequenceSame}`);
+    console.log(`Exact tree and order match: ${report.compare.exactTreeAndOrderMatch}`);
   }
 }
 
