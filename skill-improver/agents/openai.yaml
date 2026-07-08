@@ -1,0 +1,4 @@
+interface:
+  display_name: "技能改进器"
+  short_description: "通过真实闭环审查和改进技能"
+  default_prompt: "使用 $skill-improver 通过真实任务、证据链和验证闭环改进一个技能。"

@@ -163,7 +163,8 @@ function treeNodeSignature(node) {
 function treeSignature(rootObj) {
   const roots = {};
   for (const rootName of Object.keys(rootObj.roots || {})) {
-    roots[rootName] = treeNodeSignature(rootObj.roots[rootName]);
+    const root = rootObj.roots[rootName];
+    roots[rootName] = (root?.children || []).map((child) => treeNodeSignature(child));
   }
   return JSON.stringify(roots);
 }
