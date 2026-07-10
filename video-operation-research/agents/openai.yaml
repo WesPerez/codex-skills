@@ -1,4 +1,4 @@
 interface:
   display_name: "视频操作研究"
-  short_description: "先取证再复刻视频教程"
-  default_prompt: "使用 $video-operation-research 分析这个视频流程，再判断是否可以复刻操作。"
+  short_description: "从视频取证到安全执行，分流命令行代理、人工批次与全托管界面操作"
+  default_prompt: "使用 $video-operation-research 分析并复刻这个视频流程，先完成可代理步骤，再汇总人工操作或提供全托管选项。"

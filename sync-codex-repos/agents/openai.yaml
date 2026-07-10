@@ -1,0 +1,4 @@
+interface:
+  display_name: "同步 Codex 仓库"
+  short_description: "一键同步、检查、提交并推送全局配置与全局技能两个仓库"
+  default_prompt: "使用 $sync-codex-repos 更新、提交并推送全局配置和全局技能仓库。"
