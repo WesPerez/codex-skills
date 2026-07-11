@@ -27,3 +27,6 @@
 
 !/sync-codex-repos/
 !/sync-codex-repos/**
+
+!/orchestrate-long-projects/
+!/orchestrate-long-projects/**
