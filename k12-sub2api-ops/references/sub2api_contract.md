@@ -52,12 +52,12 @@
 
 ## 先预览
 
-Preview 不发送导入 payload。它应该：
+Preview 不发送任何网络请求，只做本地 bundle 检查。它应该：
 
 - 加载 bundle；
 - 汇总账号数量、platforms、plan types、缺失 access token 数量；
 - 只打印样例身份，不打印 token 值；
-- 当 auth 可用且请求了 `--skip-existing` 时，可选择拉取现有账号；
+- 不登录、不拉取现有账号；authenticated reconcile 是单独的已授权执行阶段；
 - 可选择应用 shuffle 和 max account 限制。
 
 示例：
@@ -66,7 +66,7 @@ Preview 不发送导入 payload。它应该：
 python3 scripts/import_sub2api_bundle.py \
   --base-url "$SUB2API_BASE_URL" \
   --bundle data/k12_sub2api_recommended_312.json \
-  --skip-existing
+  --max-accounts 3
 ```
 
 如果 auth 缺失但请求了 `--skip-existing`，要明确失败，而不是静默导入重复项。
@@ -80,6 +80,8 @@ python3 scripts/import_sub2api_bundle.py \
   --base-url "$SUB2API_BASE_URL" \
   --bundle data/k12_sub2api_recommended_312.json \
   --skip-existing \
+  --environment test \
+  --confirm-write \
   --execute
 ```
 
@@ -107,11 +109,7 @@ GET /admin/accounts/data?include_proxies=false
 Authorization: Bearer <token>
 ```
 
-收集身份键时使用：
-
-- email；
-- name；
-- chatgpt/account id 仅作为兜底。
+收集身份键时使用 email + chatgpt/account id 的复合身份；同邮箱不同 account id 必须保留。只有二者都缺失时才以 name 兜底。
 
 导入前过滤 bundle 账号并报告：
 
@@ -144,6 +142,8 @@ Authorization: Bearer <token>
 - 导入账号没有全部 paused；
 - 可以测试少量样例；
 - 没有触发批量 refresh。
+
+执行前记录目标环境、base URL、认证主体、账号数、是否跳过现有账号和回滚方案。执行后重新读取最小必要的账号摘要，核对新增数量与字段；失败或部分成功时停止扩大批次，并以复合身份 reconcile 后再决定是否重试。
 
 精确报告错误和部分导入。
 

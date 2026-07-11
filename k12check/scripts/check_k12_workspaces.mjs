@@ -150,8 +150,8 @@ async function findChatGptPage(cdpBase, timeoutMs) {
   const pages = await fetchJson(`${trimSlash(cdpBase)}/json/list`, timeoutMs);
   const candidates = pages.filter((page) => page.type === "page");
   const chat = candidates.find((page) => /^https:\/\/chatgpt\.com\//.test(page.url || ""));
-  const page = chat || candidates[0];
-  if (!page) throw new Error("No CDP page target found.");
+  const page = chat;
+  if (!page) throw new Error("No explicit https://chatgpt.com/ CDP page target found; refusing to evaluate another page.");
   if (!page.webSocketDebuggerUrl) throw new Error("Selected CDP page has no webSocketDebuggerUrl.");
   return page;
 }
@@ -286,13 +286,15 @@ function buildBrowserExpression(rows, opts) {
       status: "exchange-only-no-access",
       http: "",
       returned: "",
+      returnedAccountId: "",
       plan: "",
       note: "",
     };
     try {
       const exchanged = await exchange(row.id);
       item.http = String(exchanged.response.res.status);
-      item.returned = exchanged.claims.accountId ? exchanged.claims.accountId.slice(0, 8) : "";
+      item.returnedAccountId = exchanged.claims.accountId || "";
+      item.returned = item.returnedAccountId ? item.returnedAccountId.slice(0, 8) : "";
       item.plan = exchanged.claims.plan || "";
       if (exchanged.response.res.ok && exchanged.claims.accountId.toLowerCase() === row.id.toLowerCase()) {
         item.status = item.plan.toLowerCase() === "k12" ? "exchange-only-available" : "accessible-not-k12";
@@ -311,8 +313,8 @@ function buildBrowserExpression(rows, opts) {
 
   const restore = { attempted: false, ok: false, note: "" };
   if (options.restoreCurrent && isUuid(initial.accountId)) {
-    const lastReturned = rows.length ? rows[rows.length - 1].returned : "";
-    if (!lastReturned || initial.accountId.slice(0, 8).toLowerCase() !== lastReturned.toLowerCase()) {
+    const lastReturnedAccountId = rows.length ? rows[rows.length - 1].returnedAccountId : "";
+    if (!lastReturnedAccountId || initial.accountId.toLowerCase() !== lastReturnedAccountId.toLowerCase()) {
       restore.attempted = true;
       try {
         const restored = await exchange(initial.accountId);
@@ -334,7 +336,7 @@ function buildBrowserExpression(rows, opts) {
     loggedIn: true,
     sessionHttp: sessionResponse.res.status,
     currentAccount: initial.accountId ? initial.accountId.slice(0, 8) : "",
-    rows,
+    rows: rows.map(({ returnedAccountId, ...row }) => row),
     restore,
   };
 })(${JSON.stringify(rows)}, ${JSON.stringify({

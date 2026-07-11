@@ -12,7 +12,7 @@
 只读核验：
 3. 使用 `python -B` 运行 progress_long_task.py resume-check
 4. 使用 `python -B` 运行 audit_long_task.py
-5. `git --no-optional-locks status --short --ignored`
+5. `git --no-optional-locks status --short`；仅对具体风险路径检查 ignored 产物
 
 确认允许继续后：
 6. 只读 docs/project-master-plan.md 当前 phase/slice 章节
@@ -73,7 +73,7 @@ commit/push/PR 要求
 开工顺序：
 1. 仓库存在 AGENTS.md 时读取。
 2. 读 docs/execution/STATUS.md。
-3. 使用 `python -B` 运行 progress_long_task.py resume-check、audit_long_task.py，并运行 `git --no-optional-locks status --short --ignored`；若台账使用自定义路径，两个脚本必须传相同 `--output-dir/--plan-path`。
+3. 使用 `python -B` 运行 progress_long_task.py resume-check、audit_long_task.py，并运行 `git --no-optional-locks status --short`；仅对具体风险路径检查 ignored 产物。若台账使用自定义路径，两个脚本必须传相同 `--output-dir/--plan-path`。
 4. 审计允许继续后，只读主方案当前 phase/slice；只有异常时读 PROTOCOL/state/账本/checkpoint。
 5. 核对当前源码、HEAD、测试、进程和外部系统；冲突时以当前事实为准。
 
@@ -81,7 +81,7 @@ commit/push/PR 要求
 
 子代理默认只读，不写共享台账、不接管真实外部系统；主代理复核结论。unknown 副作用先对账，禁止重放。不能证明属于本轮的文件、进程、页签和产物不得清理。
 
-每个可见闭环汇报完成、当前、下一步、风险、是否启动当前版本和是否执行真实副作用。最终等待/中断所有子代理，运行完整验证和 git status --short --ignored，报告文件、产物、下载、配置、进程、清理、commit hash、push 和 PR 状态。
+每个可见闭环汇报完成、当前、下一步、风险、是否启动当前版本和是否执行真实副作用。最终等待/中断所有子代理，按失败模式运行最低充分验证和 git status --short，仅按具体风险路径检查 ignored 产物，并报告文件、产物、下载、配置、进程、清理、commit hash、push 和 PR 状态。
 ```
 
 ## 5. 异常中断恢复提示词
@@ -96,7 +96,7 @@ commit/push/PR 要求
 
 先不要修改文件、重新 bootstrap、启动应用、写数据库/AppData、发送输入、commit、push、清理或停止进程。
 
-仓库存在 AGENTS.md 时先读它，再读 STATUS；使用 `python -B` 运行 progress_long_task.py resume-check、audit_long_task.py，并运行 `git --no-optional-locks status --short --ignored`。若台账使用自定义路径，两个脚本必须传相同 `--output-dir/--plan-path`。只有异常时再读 PROTOCOL、state、账本尾和最新 checkpoint。重新观察进程、窗口、端口、浏览器或数据库身份；旧 PID/HWND/页签只作线索。
+仓库存在 AGENTS.md 时先读它，再读 STATUS；使用 `python -B` 运行 progress_long_task.py resume-check、audit_long_task.py，并运行 `git --no-optional-locks status --short`，仅按具体风险路径检查 ignored 产物。若台账使用自定义路径，两个脚本必须传相同 `--output-dir/--plan-path`。只有异常时再读 PROTOCOL、state、账本尾和最新 checkpoint。重新观察进程、窗口、端口、浏览器或数据库身份；旧 PID/HWND/页签只作线索。
 
 检查 running/unknown_after_interruption 动作、工作树漂移、过期证据、损坏 tail 和外部 lease。输出真实停点、允许/禁止动作、唯一下一步、需对账副作用和恢复置信度。
 
@@ -108,7 +108,7 @@ commit/push/PR 要求
 ```text
 使用 $orchestrate-long-projects 只读核验当前长期项目进度，不修改代码、方案或台账。
 
-仓库存在 AGENTS.md 时先读它，再读 STATUS，使用 `python -B` 运行 resume-check 和完整 audit，运行 `git --no-optional-locks status --short --ignored`，并核对必要的当前运行现场。
+仓库存在 AGENTS.md 时先读它，再读 STATUS，使用 `python -B` 运行 resume-check 和完整 audit，运行 `git --no-optional-locks status --short`，仅按具体风险路径检查 ignored 产物，并核对必要的当前运行现场。
 
 报告：最近完成、当前 phase/slice、唯一下一动作、blocker、适用的分层验收轴、最近当前有效 evidence、是否启动当前版本、是否执行真实外部动作、工作树/ignored 产物、运行进程、commit/push 状态，以及下一可见结果 ETA 范围和置信度。
 

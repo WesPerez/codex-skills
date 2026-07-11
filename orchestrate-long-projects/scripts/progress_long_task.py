@@ -55,6 +55,8 @@ RUNTIME_CATEGORIES = {
     "app_runtime", "live_action", "live_outcome", "foreground_unaffected",
     "multi_instance", "persistence", "failure_recovery", "external_state",
 }
+SIDE_EFFECT_CLASSES = {"none", "repository_write", "local_runtime", "external_read", "external_write", "destructive"}
+EXTERNAL_SIDE_EFFECT_CLASSES = {"external_write", "destructive"}
 
 
 class Context(object):
@@ -209,7 +211,7 @@ def load_profiles(context: Context) -> Dict[str, Dict[str, Any]]:
     return profiles
 
 
-def validate_profile(name: str, profile: Dict[str, Any], context: Context) -> Tuple[List[str], Path, str, int, List[str], Optional[int]]:
+def validate_profile(name: str, profile: Dict[str, Any], context: Context) -> Tuple[List[str], Path, str, int, List[str], Optional[int], bool, str]:
     command = profile.get("command")
     if not isinstance(command, list) or not command or not all(isinstance(item, str) and item for item in command):
         raise RuntimeError("profile {} command 必须是非空字符串数组".format(name))
@@ -241,7 +243,23 @@ def validate_profile(name: str, profile: Dict[str, Any], context: Context) -> Tu
         raise RuntimeError("profile {} controlType 无效".format(name))
     if profile.get("controlType") and category != "external_state":
         raise RuntimeError("control profile {} 必须使用 external_state category".format(name))
-    return command, cwd, category, timeout, artifacts, ttl
+    read_only = profile.get("readOnly")
+    if not isinstance(read_only, bool):
+        raise RuntimeError("profile {} 必须显式声明 boolean readOnly".format(name))
+    side_effect_class = profile.get("sideEffectClass")
+    if side_effect_class not in SIDE_EFFECT_CLASSES:
+        raise RuntimeError("profile {} sideEffectClass 未知；拒绝执行".format(name))
+    if read_only and side_effect_class not in {"none", "external_read"}:
+        raise RuntimeError("profile {} readOnly 与 sideEffectClass 冲突".format(name))
+    if not read_only and side_effect_class == "none":
+        raise RuntimeError("profile {} 非只读却声明 sideEffectClass=none".format(name))
+    external_authorization = profile.get("externalAuthorization")
+    if side_effect_class in EXTERNAL_SIDE_EFFECT_CLASSES:
+        if not isinstance(external_authorization, str) or not external_authorization.strip():
+            raise RuntimeError("profile {} 执行外部/破坏性动作必须声明 externalAuthorization".format(name))
+    elif external_authorization is not None:
+        raise RuntimeError("profile {} 非外部写入不得声明 externalAuthorization".format(name))
+    return command, cwd, category, timeout, artifacts, ttl, read_only, side_effect_class
 
 
 def command_render(context: Context, _: argparse.Namespace) -> int:
@@ -329,11 +347,15 @@ def command_slice_state(context: Context, args: argparse.Namespace) -> int:
 
 
 def command_run_evidence(context: Context, args: argparse.Namespace) -> int:
+    if args.authorization == "read_only":
+        raise RuntimeError("read_only workflow 永不执行 run-evidence")
     profiles = load_profiles(context)
     profile = profiles.get(args.profile)
     if not isinstance(profile, dict):
         raise RuntimeError("未知 profile {}；先在 profiles.json 固定命令和验收类别".format(args.profile))
-    command, cwd, category, profile_timeout, required_artifacts, ttl = validate_profile(args.profile, profile, context)
+    command, cwd, category, profile_timeout, required_artifacts, ttl, read_only, side_effect_class = validate_profile(args.profile, profile, context)
+    if side_effect_class in EXTERNAL_SIDE_EFFECT_CLASSES and args.authorization != "external_authorized":
+        raise RuntimeError("外部/破坏性 profile 必须使用 --authorization external_authorized")
     with FileLock(context.lock_path):
         preflight_state, _, _ = context.load()
         validate_evidence_links(preflight_state, category, args.criterion or [], args.gate or [])
@@ -435,6 +457,8 @@ def command_run_evidence(context: Context, args: argparse.Namespace) -> int:
                 "captureMethod": "command_runner",
                 "profile": args.profile,
                 "profileDigest": object_hash(profile),
+                "readOnly": read_only,
+                "sideEffectClass": side_effect_class,
                 "sourceUnchangedDuringRun": source_unchanged,
             },
         })
@@ -980,6 +1004,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--criterion", action="append")
     run.add_argument("--gate", action="append")
     run.add_argument("--timeout-seconds", type=int)
+    run.add_argument("--authorization", required=True, choices=["read_only", "repo_write", "external_authorized"], help="当前 workflow 的明确执行授权")
 
     gate = subparsers.add_parser("gate", help="用已有证据更新一个验收轴")
     gate.add_argument("--name", required=True)

@@ -43,6 +43,35 @@ function displayUrl(url) {
   return `${text.slice(0, 120)}...<len=${text.length} sha256=${sha256(text).slice(0, 16)}>`;
 }
 
+function canonicalUrlIdentity(value) {
+  const text = String(value || "");
+  const match = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^/?#]*)([\s\S]*)$/.exec(text);
+  if (!match) return text;
+  const scheme = match[1].toLowerCase();
+  const authority = match[2];
+  const suffix = match[3];
+  const at = authority.lastIndexOf("@");
+  const userinfo = at >= 0 ? authority.slice(0, at + 1) : "";
+  const hostPort = at >= 0 ? authority.slice(at + 1) : authority;
+  let host = hostPort;
+  let port = "";
+  if (hostPort.startsWith("[")) {
+    const close = hostPort.indexOf("]");
+    if (close < 0) return text;
+    host = hostPort.slice(0, close + 1);
+    if (hostPort.slice(close + 1).startsWith(":")) port = hostPort.slice(close + 2);
+    else if (hostPort.length !== close + 1) return text;
+  } else {
+    const colon = hostPort.lastIndexOf(":");
+    if (colon >= 0 && hostPort.indexOf(":") === colon) {
+      host = hostPort.slice(0, colon);
+      port = hostPort.slice(colon + 1);
+    }
+  }
+  const keepPort = !((scheme === "http" && port === "80") || (scheme === "https" && port === "443"));
+  return `${scheme}://${userinfo}${host.toLowerCase()}${keepPort && port ? `:${port}` : ""}${suffix}`;
+}
+
 function walkNode(node, root, folders, out) {
   if (!node) return;
   if (node.type === "url" && node.url) {
@@ -100,7 +129,7 @@ function topLevel(rootObj, rootName) {
 function duplicateGroups(urls) {
   const groups = new Map();
   for (const item of urls) {
-    const key = item.url.toLowerCase();
+    const key = canonicalUrlIdentity(item.url);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(item);
   }
@@ -189,7 +218,7 @@ function summarize(file) {
     treeSignature: treeSignature(rootObj),
     checksum: checksum(rootObj),
     duplicateSamples: dupes.slice(0, 20),
-    urlSet: new Set(inventory.urls.map((x) => x.url.toLowerCase())),
+    urlSet: new Set(inventory.urls.map((x) => canonicalUrlIdentity(x.url))),
   };
 }
 

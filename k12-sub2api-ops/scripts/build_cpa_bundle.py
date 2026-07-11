@@ -4,6 +4,7 @@ import json
 import re
 import sys
 import zipfile
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,16 +41,14 @@ def account_name(email, fallback):
 
 def account_key(account):
     credentials = account.get("credentials") or {}
-    for key in ("email",):
-        value = credentials.get(key) or account.get(key)
-        if value:
-            return f"{key}:{str(value).strip().lower()}"
+    email = str(credentials.get("email") or account.get("email") or "").strip().lower()
+    account_id = str(credentials.get("chatgpt_account_id") or credentials.get("account_id") or "").strip().lower()
+    token = str(credentials.get("access_token") or "")
+    if email or account_id or token:
+        return ("account", email, account_id, token)
     name = account.get("name")
     if name:
         return f"name:{str(name).strip().lower()}"
-    token = credentials.get("access_token")
-    if token:
-        return f"access_token:{token[:80]}"
     return json.dumps(account, sort_keys=True, ensure_ascii=False)[:200]
 
 
@@ -68,7 +67,7 @@ def convert_cpa_account(raw, source_zip, source_entry, index):
         "expires_at": expires_at,
         "id_token": raw.get("id_token") or "",
         "organization_id": "",
-        "plan_type": "k12",
+        "plan_type": raw.get("plan_type") or raw.get("chatgpt_plan_type") or "",
         "refresh_token": raw.get("refresh_token") or "",
         "session_token": "",
     }
@@ -127,9 +126,13 @@ def load_cpa_zip(zip_path, seen, start_index, dedupe):
     }, accounts
 
 
-def write_json(path, data):
+def write_json(path, data, force=False):
+    if path.exists() and not force:
+        raise SystemExit(f"refusing to overwrite existing file without --force: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    if os.name != "nt":
+        path.chmod(0o600)
 
 
 def main():
@@ -137,6 +140,7 @@ def main():
     parser.add_argument("--source-zip", action="append", required=True, help="CPA zip file. Repeat for multiple batches.")
     parser.add_argument("--out", required=True, help="Output Sub2API bundle JSON path.")
     parser.add_argument("--manifest", required=True, help="Output manifest JSON path.")
+    parser.add_argument("--force", action="store_true", help="Allow overwriting the explicitly named output files.")
     parser.set_defaults(dedupe=False)
     parser.add_argument("--dedupe", dest="dedupe", action="store_true", help="Deduplicate entries using account identity rules.")
     parser.add_argument("--no-dedupe", dest="dedupe", action="store_false", help="Keep every JSON entry even when email/name repeats. This is the default.")
@@ -174,8 +178,8 @@ def main():
 
     out_path = Path(args.out).expanduser().resolve()
     manifest_path = Path(args.manifest).expanduser().resolve()
-    write_json(out_path, bundle)
-    write_json(manifest_path, manifest)
+    write_json(out_path, bundle, args.force)
+    write_json(manifest_path, manifest, args.force)
     print(json.dumps({
         "accounts": len(accounts),
         "bundle": str(out_path),

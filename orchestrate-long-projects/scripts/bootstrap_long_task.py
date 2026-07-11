@@ -223,14 +223,14 @@ def protocol_template(mode: str) -> str:
 ## 开工
 
 1. 读 AGENTS.md 和 STATUS。
-2. 使用 `python -B` 运行只读 resume-check、完整 audit，并运行 `git --no-optional-locks status --short --ignored`。
+2. 使用 `python -B` 运行只读 resume-check、完整 audit，并运行 `git --no-optional-locks status --short`；仅对已识别的具体 ignored 风险路径追加 `--ignored -- <path>`。
 3. 只有审计异常、未决副作用或 STATUS 指示时再读本协议全文。
 4. 当前源码、Git、测试和实际运行结果优先于线程历史。
 
 ## 单写入器
 
 - 只有主代理用 `progress_long_task.py` 写 state、events、evidence、STATUS 和 checkpoint。
-- 子代理默认只读并返回文件、产物、网络、配置、进程、测试、commit 和清理摘要。
+- 子代理默认只读；无副作用时一句话返回结论与证据，发生写入或副作用时才返回完整审计摘要。
 
 ## 副作用
 
@@ -242,7 +242,7 @@ def protocol_template(mode: str) -> str:
 ## 收尾
 
 - 等待或中断所有子代理。
-- 运行完整验证和 `git --no-optional-locks status --short --ignored`。
+- 按失败模式运行最低充分验证和 `git --no-optional-locks status --short`；仅对具体风险路径检查 ignored 产物。
 - 报告文件、产物、下载、配置、进程、清理、commit 和 push 状态。
 """.format(hardened=hardened)
 
@@ -255,7 +255,7 @@ def agents_template(plan_rel: str, output_rel: str, mode: str) -> str:
 开工顺序：
 
 1. 读取 `{output}/STATUS.md`。
-2. 运行只读 `python -B <skill-dir>/scripts/progress_long_task.py --repo <repo> --output-dir "{output}" --plan-path "{plan}" resume-check`、`python -B <skill-dir>/scripts/audit_long_task.py --repo <repo> --output-dir "{output}" --plan-path "{plan}"` 和 `git --no-optional-locks status --short --ignored`。
+2. 运行只读 `python -B <skill-dir>/scripts/progress_long_task.py --repo <repo> --output-dir "{output}" --plan-path "{plan}" resume-check`、`python -B <skill-dir>/scripts/audit_long_task.py --repo <repo> --output-dir "{output}" --plan-path "{plan}"` 和 `git --no-optional-locks status --short`；仅对具体风险路径检查 ignored 产物。
 3. 审计允许继续后，只读 `{plan}` 当前阶段章节。
 4. 当前源码、Git、测试和运行结果高于历史线程。
 
@@ -356,7 +356,7 @@ def build_state(args: argparse.Namespace, snapshot: Dict[str, Any], output_rel: 
         },
         "resume": {
             "blockers": [],
-            "nextCommands": ["git --no-optional-locks status --short --ignored", "运行项目现有最小安全测试", "更新主方案当前事实"],
+            "nextCommands": ["git --no-optional-locks status --short", "按失败模式运行最低充分测试", "更新主方案当前事实"],
             "doNotDo": ["不要凭旧线程直接继续副作用", "不要删除或停止归属不明对象", "不要把代码存在写成真实业务完成"],
         },
     }

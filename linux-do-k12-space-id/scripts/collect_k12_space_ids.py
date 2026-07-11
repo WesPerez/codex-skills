@@ -13,6 +13,8 @@ import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Iterable
 
 
@@ -53,10 +55,11 @@ class TopicResult:
     status: str = "ok"
     ids: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    discovery_sources: list[str] = field(default_factory=list)
 
 
 def reader_url(topic_id: int) -> str:
-    return f"https://r.jina.ai/http://r.jina.ai/http://linux.do/t/topic/{topic_id}"
+    return f"https://r.jina.ai/http://linux.do/t/topic/{topic_id}"
 
 
 def fetch(url: str, proxy: str, timeout: int, direct_timeout: int) -> tuple[str, str]:
@@ -181,8 +184,25 @@ def parse_topic(topic_id: int, text: str, method: str) -> TopicResult:
     return result
 
 
-def sort_key(item: TopicResult) -> tuple[str, int]:
-    return (item.published or "", item.topic_id)
+def parse_published(value: str) -> datetime | None:
+    if not value:
+        return None
+    normalized = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        try:
+            parsed = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def sort_key(item: TopicResult) -> tuple[bool, datetime, int]:
+    parsed = parse_published(item.published)
+    return (parsed is not None, parsed or datetime.min.replace(tzinfo=timezone.utc), item.topic_id)
 
 
 def main() -> int:
@@ -201,20 +221,46 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
+    discovery: dict[str, object]
+    candidate_origins: dict[str, list[str]] = {}
     if args.candidate_id:
         candidate_ids = unique(str(i) for i in args.candidate_id)
+        for value in candidate_ids:
+            candidate_origins[value] = ["explicit-candidate"]
+        discovery = {
+            "mode": "explicit-candidates",
+            "seed_topic": None,
+            "seed_candidates_found": 0,
+            "seed_candidates_selected": 0,
+            "extra_search_ids": [],
+            "explicit_candidate_ids": [int(value) for value in candidate_ids],
+        }
     else:
         seed_text, _ = fetch(reader_url(args.seed_topic), args.proxy, args.timeout, args.direct_timeout)
-        candidate_ids = extract_topic_ids(seed_text)
-        candidate_ids.extend(str(i) for i in args.extra_id)
-        candidate_ids = unique(candidate_ids)
-        candidate_ids = sorted(candidate_ids, key=lambda x: int(x), reverse=True)[: args.limit]
+        seed_ids = extract_topic_ids(seed_text)
+        selected_seed_ids = sorted(seed_ids, key=lambda x: int(x), reverse=True)[: args.limit]
+        extra_ids = unique(str(i) for i in args.extra_id)
+        candidate_ids = unique([*selected_seed_ids, *extra_ids])
+        for value in selected_seed_ids:
+            candidate_origins.setdefault(value, []).append("seed-topic")
+        for value in extra_ids:
+            candidate_origins.setdefault(value, []).append("extra-search")
+        discovery = {
+            "mode": "seed-plus-extra-search",
+            "seed_topic": args.seed_topic,
+            "seed_candidates_found": len(seed_ids),
+            "seed_candidates_selected": len(selected_seed_ids),
+            "extra_search_ids": [int(value) for value in extra_ids],
+            "explicit_candidate_ids": [],
+        }
 
     results: list[TopicResult] = []
     for raw_id in candidate_ids:
         topic_id = int(raw_id)
         text, method = fetch(reader_url(topic_id), args.proxy, args.timeout, args.direct_timeout)
-        results.append(parse_topic(topic_id, text, method))
+        result = parse_topic(topic_id, text, method)
+        result.discovery_sources = candidate_origins.get(raw_id, ["unknown"])
+        results.append(result)
 
     results = sorted(results, key=sort_key, reverse=True)
     id_sources: dict[str, list[str]] = {}
@@ -224,6 +270,7 @@ def main() -> int:
             id_sources.setdefault(value, []).append(label)
 
     payload = {
+        "discovery": discovery,
         "sources": [item.__dict__ for item in results],
         "ids": [{"id": value, "sources": labels} for value, labels in sorted(id_sources.items())],
     }
@@ -231,9 +278,13 @@ def main() -> int:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 
+    print("Discovery coverage:")
+    print(json.dumps(discovery, ensure_ascii=False))
+    print()
     print("Sources:")
     for idx, item in enumerate(results, start=1):
-        print(f"S{idx}: {item.published or 'unknown-time'} {item.url} {item.title or item.status}")
+        origins = ",".join(item.discovery_sources)
+        print(f"S{idx}: {item.published or 'unknown-time'} [{origins}] {item.url} {item.title or item.status}")
         if item.status != "ok" or item.notes:
             note = "; ".join([item.status] + item.notes)
             print(f"    note: {note}")

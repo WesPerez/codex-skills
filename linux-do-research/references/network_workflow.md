@@ -11,11 +11,11 @@
 PowerShell 示例：
 
 ```powershell
-curl.exe -x http://127.0.0.1:10808 -L --max-time 30 "https://r.jina.ai/http://r.jina.ai/http://linux.do/t/topic/2508374"
+curl.exe -x http://127.0.0.1:10808 -L --max-time 30 "https://r.jina.ai/http://linux.do/t/topic/2508374"
 curl.exe -x http://127.0.0.1:10808 -L --max-time 30 -A "Mozilla/5.0" "https://linux.do/t/topic/2508374.json"
 ```
 
-如果本地代理不存在，或因代理连接错误失败，做一次短直连重试，通常使用 `--max-time 15`，然后转到另一个代理支持/搜索索引路径。记录哪条路径可用。
+如果本地代理不存在，或因代理连接错误失败，做一次短直连重试，通常使用 `--max-time 15`，然后转到另一个代理支持/搜索索引路径。记录哪条路径可用。默认保持 TLS 证书验证；只有明确识别为 TLS 验证失败时，才能对该单条只读公开请求做一次显式 `-k` 诊断。该结果只能作为不可信线索，不能证明内容真实性或可用性，也不能变成脚本默认值。
 
 不要持久化全局 `HTTP_PROXY` 或 `HTTPS_PROXY`。
 
@@ -38,8 +38,8 @@ site:linux.do workspace deactivated K12
 先尝试主题 reader URL：
 
 ```text
-https://r.jina.ai/http://r.jina.ai/http://linux.do/t/topic/<topic_id>
-https://r.jina.ai/http://r.jina.ai/http://linux.do/t/topic/<topic_id>/<floor>
+https://r.jina.ai/http://linux.do/t/topic/<topic_id>
+https://r.jina.ai/http://linux.do/t/topic/<topic_id>/<floor>
 ```
 
 使用位置 URL 补齐缺口：
@@ -83,7 +83,7 @@ https://linux.do/uploads/short-url/<id>.txt
 
 ```powershell
 curl.exe -x http://127.0.0.1:10808 -L --max-time 30 -A "Mozilla/5.0" "<forum-upload-url>"
-curl.exe -x http://127.0.0.1:10808 -L --max-time 30 "https://r.jina.ai/http://r.jina.ai/http://linux.do/uploads/short-url/<id>.txt"
+curl.exe -x http://127.0.0.1:10808 -L --max-time 30 "https://r.jina.ai/http://linux.do/uploads/short-url/<id>.txt"
 ```
 
 如果两者都失败，报告可见文件名、可见大小、来源主题/楼层、尝试过的方法，以及需要浏览器升级来解析它。不要说附件不存在。
@@ -116,6 +116,8 @@ curl.exe -x http://127.0.0.1:10808 -L --max-time 30 "https://r.jina.ai/http://r.
 - 使用的代理/直连路径；
 - 已覆盖的楼层和链接；
 - 需要浏览器帮助的精确缺口。
+
+Cloudflare `403`、reader 空页或单一搜索缓存失败都不是资源不存在的证据。先交叉检查普通主题 URL、规范 reader URL、定向楼层 URL 和无需认证的网络 JSON；仍有影响结论的缺口时才升级浏览器。
 
 ## 浏览器升级护栏
 

@@ -626,7 +626,7 @@ def render_status(
     for key, value in state.get("projectVerification", {}).items():
         lines.append("| `{}` | `{}` | {} |".format(md_cell(key), md_cell(value.get("status")), md_cell(value.get("note", ""))))
     lines.extend(["", "## 恢复", ""])
-    lines.extend(md_list(state.get("resume", {}).get("nextCommands", []), "先运行 continuity audit 和 git status --short --ignored"))
+    lines.extend(md_list(state.get("resume", {}).get("nextCommands", []), "先运行 continuity audit 和 git status --short；仅按具体风险路径检查 ignored 产物"))
     lines.extend(["", "### 禁止盲目执行", ""])
     lines.extend(md_list(state.get("resume", {}).get("doNotDo", [])))
     lines.extend(["", "## 最近事件", "", "| seq | 时间 | 类型 | 摘要 |", "|---:|---|---|---|"])

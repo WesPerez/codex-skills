@@ -1,0 +1,4 @@
+interface:
+  display_name: "LINUX DO 节点检索"
+  short_description: "快速发现并核验可导入的 Clash/V2Ray 节点资源"
+  default_prompt: "使用 $find-linuxdo-node-links 搜索并核验近期可导入的 LINUX DO 节点资源。"

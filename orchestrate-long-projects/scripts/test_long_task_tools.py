@@ -73,10 +73,47 @@ def audit_command(repo, extra=None):
 
 
 def progress_command(repo, *args):
-    return [sys.executable, str(SCRIPT_DIR / "progress_long_task.py"), "--repo", str(repo)] + list(args)
+    command_args = list(args)
+    if command_args and command_args[0] == "run-evidence":
+        profile_path = Path(repo) / "docs" / "execution" / "profiles.json"
+        document = load_json(profile_path)
+        profile_name = command_args[command_args.index("--profile") + 1]
+        profile = document["profiles"][profile_name]
+        profile.setdefault("readOnly", False)
+        profile.setdefault("sideEffectClass", "repository_write")
+        profile_path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        command_args[1:1] = ["--authorization", "repo_write"]
+    return [sys.executable, str(SCRIPT_DIR / "progress_long_task.py"), "--repo", str(repo)] + command_args
 
 
 class LongTaskToolsTest(unittest.TestCase):
+    def test_run_evidence_profile_contract_fails_closed(self):
+        with tempfile.TemporaryDirectory(prefix="olp-profile-contract-") as temp:
+            repo = init_repo(Path(temp) / "repo")
+            run(bootstrap_command(repo), repo)
+            profile_path = repo / "docs" / "execution" / "profiles.json"
+            document = load_json(profile_path)
+            document["profiles"]["missing"] = {
+                "category": "test", "command": ["git", "rev-parse", "HEAD"], "cwd": ".",
+                "requiredArtifacts": [],
+            }
+            profile_path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            base = [sys.executable, str(SCRIPT_DIR / "progress_long_task.py"), "--repo", str(repo), "run-evidence"]
+            output = run(base + ["--authorization", "repo_write", "--profile", "missing", "--claim", "missing fields"], repo, expected=1)
+            self.assertIn("readOnly", output)
+
+            document = load_json(profile_path)
+            document["profiles"]["missing"].update({"readOnly": True, "sideEffectClass": "none"})
+            profile_path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            output = run(base + ["--authorization", "read_only", "--profile", "missing", "--claim", "read only blocked"], repo, expected=1)
+            self.assertIn("永不执行", output)
+
+            document = load_json(profile_path)
+            document["profiles"]["missing"].update({"readOnly": False, "sideEffectClass": "external_write"})
+            profile_path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            output = run(base + ["--authorization", "external_authorized", "--profile", "missing", "--claim", "missing external auth"], repo, expected=1)
+            self.assertIn("externalAuthorization", output)
+
     def test_light_and_standard_bootstrap(self):
         with tempfile.TemporaryDirectory(prefix="olp-bootstrap-") as temp:
             light = init_repo(Path(temp) / "light")
@@ -106,7 +143,7 @@ class LongTaskToolsTest(unittest.TestCase):
             self.assertIn("python -B", agents)
             self.assertIn('--output-dir "操作 台账/ledger"', agents)
             self.assertIn('--plan-path "操作 台账/主 方案.md"', agents)
-            self.assertIn("git --no-optional-locks status --short --ignored", agents)
+            self.assertIn("git --no-optional-locks status --short", agents)
             status_path = light / "操作 台账" / "ledger" / "STATUS.md"
             lines = [
                 line for line in status_path.read_text(encoding="utf-8").splitlines()

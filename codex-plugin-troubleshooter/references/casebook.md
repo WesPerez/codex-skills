@@ -59,7 +59,8 @@ codex plugin list
 仅在 `mcp__node_repl__js` 可用时使用：
 
 ```js
-const { setupBrowserRuntime } = await import("file:///C:/Users/Wes/.codex/plugins/cache/openai-bundled/chrome/26.602.40724/scripts/browser-client.mjs");
+// 先从当前插件元数据或工具返回值解析实际 skill/plugin 根目录。
+const { setupBrowserRuntime } = await import("file:///<resolved-current-plugin-root>/scripts/browser-client.mjs");
 await setupBrowserRuntime({ globals: globalThis });
 globalThis.browser = await agent.browsers.get("extension");
 const tabs = await browser.user.openTabs();
@@ -78,10 +79,11 @@ foreach($p in 10808,7890,7897,1080) {
 }
 
 curl.exe -x http://127.0.0.1:10808 -L -A "Mozilla/5.0" https://developers.openai.com/codex/codex-manual.md
-curl.exe -k -x http://127.0.0.1:10808 -L -A "Mozilla/5.0" https://api.github.com/repos/openai/codex/issues/28481
+curl.exe -x http://127.0.0.1:10808 -L -A "Mozilla/5.0" https://api.github.com/repos/openai/codex/issues/28481
 ```
 
 除非用户明确要求持久化代理配置，否则代理只用于这次查询。
+如果证书校验失败，不把 `-k` 结果提升为可信证据；最多在用户明确授权的单次诊断中作为待复核线索，并在报告中标注 TLS 未验证。
 
 ## 决策树
 

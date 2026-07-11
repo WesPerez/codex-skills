@@ -64,7 +64,7 @@ description: 诊断并修复 Codex Desktop 插件/工具暴露问题，尤其是
 ## 已知根因
 
 - `features.apps = true` 在受影响的 Desktop 构建中可能用 `codex_apps` 连接器工具淹没工具表面，并隐藏 `mcp__node_repl__js`。官方文档说明 `apps` 默认是 `false`，只用于 ChatGPT Apps/connectors 支持。
-- `openaiDeveloperDocs` MCP 曾在自定义 provider 上造成类似的模型可见工具问题。除非任务明确需要 Docs MCP 且已经验证健康，否则禁用它。
+- `openaiDeveloperDocs` MCP 曾在自定义 provider 上造成类似的模型可见工具问题。只把它视为待核验的历史根因；本技能不得自行安装、启用或测试它。只有用户明确要求且 `openai-docs` 技能允许时，才交由该技能处理。
 - Codex 更新可能改变内置运行时路径。需要根据当前 Native Host 注册表修复陈旧的 `node_repl.exe`、`node.exe`、`node_modules` 和 Chrome `latest` junction。
 - 不要仅仅因为另一个注册表项不同，就强制重写有效的 `CODEX_CLI_PATH`。如果路径存在且可用，保留它。
 - 当 Codex 扩展已安装并且 Edge 有 Native Messaging Host 注册项时，Edge 可以通过 Chrome 扩展链工作。检查该注册项前，不要断定“Edge 不支持”。
@@ -94,7 +94,7 @@ description: 诊断并修复 Codex Desktop 插件/工具暴露问题，尤其是
 curl.exe -x http://127.0.0.1:10808 -L -A "Mozilla/5.0" https://developers.openai.com/codex/codex-manual.md
 ```
 
-3. 如果 Windows Schannel 通过代理访问 GitHub API 时遇到吊销错误，只对这一次只读查询使用 `curl.exe -k`。
+3. 如果 Windows Schannel 通过代理访问 GitHub API 时遇到吊销错误，优先更换受信任网络路径或使用能正常校验证书的客户端。不得把 `curl.exe -k` 的结果当作可信证据；用户明确授权单次降级时，也只能作为待复核线索并记录 TLS 未验证。
 4. 用精确症状字符串搜索 GitHub issues 和论坛：
    - `mcp__node_repl__js unavailable Codex Desktop`
    - `unsupported call: mcp__node_repl__js`
@@ -107,7 +107,9 @@ curl.exe -x http://127.0.0.1:10808 -L -A "Mozilla/5.0" https://developers.openai
 ## 修复纪律
 
 - 写入前优先做 no-op dry run。
-- 编辑 `config.toml` 或 CC Switch DB/provider 模板前先备份。
+- 编辑 `config.toml`、注册表或 CC Switch DB/provider 模板前先备份并记录原值、目标值、备份路径、恢复命令和需要重启的组件；不能验证备份可读时不写入。
 - 除非断裂层级证明必要，否则不要清插件缓存、重装扩展或重置 Codex。
 - 不要检查 cookies、浏览器存储、密码或会话存储。
-- 修复后通过官方插件路径验证，例如 `agent.browsers.get("extension")` 和 `browser.user.openTabs()`。
+- 修改后先验证配置/注册表持久化，再按最小范围重启或开启新任务，记录是否需要用户完成交互式重启。验证失败时按已记录原值回滚并再次核验；不做宽泛缓存清理。
+- 修复后通过当前插件技能解析出的运行时入口验证，不使用固定缓存版本路径。确认工具暴露和最小只读探针健康后，把实际浏览器任务交还 `chrome:control-chrome` 或适用的官方浏览器技能；只有浏览器外桌面操作才交给 `computer-use:computer-use`。
+- 最终报告必须包含断裂层级、变更前后值、备份/回滚、重启、验证结果、未解决风险和交接目标。

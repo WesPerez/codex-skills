@@ -13,6 +13,43 @@ from pathlib import Path
 
 
 DEFAULT_TIMEOUT = 120
+SECRET_KEYS = {
+    "access_token", "refresh_token", "id_token", "session_token",
+    "authorization", "cookie", "cookies", "bearer", "password", "passwd",
+    "token", "tokens", "secret", "secrets", "api_key", "private_key",
+    "credential", "credentials",
+}
+
+
+def is_secret_key(value):
+    key = str(value).strip().lower().replace("-", "_")
+    return key in SECRET_KEYS or key.endswith(("_token", "_secret", "_password", "_passwd", "_cookie", "_credential"))
+
+
+def redact(value):
+    if isinstance(value, dict):
+        return {key: ("[REDACTED]" if is_secret_key(key) else redact(item)) for key, item in value.items()}
+    if isinstance(value, list):
+        return [redact(item) for item in value]
+    return value
+
+
+def mask_email(value):
+    text = str(value or "")
+    if "@" not in text:
+        return text[:2] + "***" if text else ""
+    local, domain = text.split("@", 1)
+    return f"{local[:2]}***@{domain}"
+
+
+def validate_base_url(base_url, allow_insecure_remote=False):
+    parsed = urllib.parse.urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise RuntimeError("--base-url must be an absolute HTTP(S) URL")
+    loopback = parsed.hostname.lower() in {"127.0.0.1", "localhost", "::1"}
+    if parsed.scheme != "https" and not loopback and not allow_insecure_remote:
+        raise RuntimeError("non-loopback Sub2API endpoints require HTTPS; use --allow-insecure-remote only for an explicitly authorized isolated environment")
+    return loopback
 
 
 def load_json(path):
@@ -24,7 +61,7 @@ def unwrap_response(payload):
     if isinstance(payload, dict) and "code" in payload:
         if payload.get("code") == 0:
             return payload.get("data")
-        raise RuntimeError(f"API error code={payload.get('code')} message={payload.get('message')}")
+        raise RuntimeError(f"API error code={payload.get('code')}")
     return payload
 
 
@@ -54,8 +91,7 @@ def request_json(method, base_url, path, body=None, token=None, cookie=None, ext
                 return None
             return unwrap_response(json.loads(text))
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:800]
-        raise RuntimeError(f"HTTP {exc.code} {method} {url}: {detail}") from exc
+        raise RuntimeError(f"HTTP {exc.code} during {method} {urllib.parse.urlparse(url).path}") from exc
 
 
 def login(base_url, login_name, password, timeout):
@@ -75,14 +111,15 @@ def login(base_url, login_name, password, timeout):
             last_error = RuntimeError("login response did not include access_token")
         except Exception as exc:
             last_error = exc
-    raise RuntimeError(f"login failed: {last_error}")
+    raise RuntimeError("login failed") from last_error
 
 
 def account_identity(account):
     credentials = account.get("credentials") or {}
     return {
         "name": account.get("name"),
-        "email": credentials.get("email") or account.get("email"),
+        "email": mask_email(credentials.get("email") or account.get("email")),
+        "raw_email": credentials.get("email") or account.get("email"),
         "chatgpt_account_id": credentials.get("chatgpt_account_id") or credentials.get("account_id") or account.get("account_id"),
         "platform": account.get("platform"),
         "type": account.get("type"),
@@ -92,11 +129,12 @@ def account_identity(account):
 def identity_key(identity):
     # Many K12 accounts can share one chatgpt_account_id because they are joined
     # to the same workspace. Treat email/name as the duplicate boundary first.
-    for key in ("email", "name", "chatgpt_account_id"):
-        value = identity.get(key)
-        if value:
-            return f"{key}:{str(value).strip().lower()}"
-    return None
+    email = str(identity.get("raw_email") or "").strip().lower()
+    account_id = str(identity.get("chatgpt_account_id") or "").strip().lower()
+    name = str(identity.get("name") or "").strip().lower()
+    if email or account_id:
+        return (email, account_id)
+    return ("name", name) if name else None
 
 
 def summarize_bundle(bundle):
@@ -119,8 +157,25 @@ def summarize_bundle(bundle):
         "platforms": platforms,
         "plan_types": plan_types,
         "missing_access_token": missing_tokens,
-        "sample_identities": identities[:5],
+        "sample_identities": [{key: value for key, value in identity.items() if key != "raw_email"} for identity in identities[:5]],
     }
+
+
+def validate_accounts_for_execute(bundle):
+    errors = []
+    for index, account in enumerate(bundle.get("accounts") or []):
+        credentials = account.get("credentials") or {}
+        if account.get("platform") != "openai":
+            errors.append(f"account[{index}].platform must be openai")
+        if account.get("type") != "oauth":
+            errors.append(f"account[{index}].type must be oauth")
+        if str(credentials.get("plan_type") or "").lower() != "k12":
+            errors.append(f"account[{index}].credentials.plan_type must be k12")
+        if not credentials.get("access_token"):
+            errors.append(f"account[{index}].credentials.access_token is required")
+    if errors:
+        preview = "; ".join(errors[:10])
+        raise RuntimeError(f"execute validation failed ({len(errors)} errors): {preview}")
 
 
 def fetch_existing_keys(base_url, token, cookie, timeout):
@@ -185,26 +240,43 @@ def main():
     parser.add_argument("--password", default=os.getenv("SUB2API_PASSWORD", ""))
     parser.add_argument("--header", action="append", default=[])
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
+    parser.add_argument("--environment", choices=["local", "development", "test", "preproduction", "production"], default="")
+    parser.add_argument("--confirm-write", action="store_true", help="Confirm the scoped account import and its rollback plan.")
+    parser.add_argument("--allow-insecure-remote", action="store_true", help="Allow HTTP to a non-loopback host only in an explicitly authorized isolated environment.")
     args = parser.parse_args()
 
     bundle_path = Path(args.bundle).expanduser().resolve()
     bundle = load_json(bundle_path)
     summary = summarize_bundle(bundle)
 
-    print(json.dumps({
+    loopback = validate_base_url(args.base_url, args.allow_insecure_remote)
+    print(json.dumps(redact({
         "mode": "execute" if args.execute else "preview",
         "base_url": args.base_url,
         "bundle": str(bundle_path),
         "summary": summary,
-    }, ensure_ascii=False, indent=2))
+    }), ensure_ascii=False, indent=2))
+
+    if args.execute:
+        if not args.environment:
+            raise SystemExit("--execute requires --environment")
+        if args.environment in {"production", "preproduction"}:
+            raise SystemExit("direct import to production/preproduction is prohibited; use the approved deployment process")
+        if not loopback and args.environment == "local":
+            raise SystemExit("--environment local requires a loopback base URL")
+        if not args.confirm_write:
+            raise SystemExit("--execute requires --confirm-write after confirming scope, rollback, and post-import verification")
+        validate_accounts_for_execute(bundle)
 
     token = args.bearer.strip()
     cookie = args.cookie.strip()
-    if not token and not cookie and args.login:
+    if args.execute and not token and not cookie and args.login:
         password = args.password or getpass.getpass("Sub2API password: ")
         token = login(args.base_url, args.login, password, args.timeout)
         print("login: ok")
 
+    if args.skip_existing and not args.execute:
+        raise SystemExit("preview is local-only; authenticated reconciliation requires --execute and explicit authorization")
     if args.skip_existing:
         if not token and not cookie:
             raise SystemExit("--skip-existing requires --bearer, --cookie, or --login")
@@ -260,10 +332,7 @@ def main():
         timeout=args.timeout,
     )
     elapsed = round(time.time() - started, 2)
-    if isinstance(result, dict):
-        safe_result = {key: value for key, value in result.items() if key.lower() not in {"accounts", "tokens", "credentials"}}
-    else:
-        safe_result = result
+    safe_result = redact(result)
     print(json.dumps({
         "imported_requested_accounts": len(bundle["accounts"]),
         "elapsed_seconds": elapsed,

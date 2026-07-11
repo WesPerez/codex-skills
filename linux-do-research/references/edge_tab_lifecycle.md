@@ -66,36 +66,11 @@
 
 ## 官方扩展模式
 
-典型 Node REPL 初始化：
-
-```js
-var pluginRoot = "C:/Users/Wes/.codex/plugins/cache/openai-bundled/chrome/26.602.40724";
-var browserModule = await import(pluginRoot + "/scripts/browser-client.mjs");
-await browserModule.setupBrowserRuntime({ globals: globalThis });
-globalThis.browser = await agent.browsers.get("extension");
-var tabs = await browser.user.openTabs();
-```
+使用当前会话暴露的官方浏览器插件和工具元数据，不硬编码插件缓存版本或安装路径。工具未暴露、初始化失败或连接失败时，按适用的官方插件技能诊断；不要猜测缓存目录，也不要自动降级到 Computer Use。
 
 不要把浏览器/插件标签页导航到 LINUX DO `.json` 主题 URL，例如 `https://linux.do/t/topic/<id>.json`；使用普通主题页和主题位置页，然后提取 DOM 可见帖子。
 
-接管现有标签页：
-
-```js
-var tab = await browser.user.claimTab("<tab-id>");
-```
-
-创建临时标签页：
-
-```js
-var temp = await browser.tabs.new();
-await temp.goto("https://linux.do/t/topic/123/10");
-```
-
-关闭已知临时标签页：
-
-```js
-await temp.close();
-```
+通过插件提供的标签页枚举、接管、新建、导航、DOM 提取和关闭能力执行操作；具体方法名以当前工具契约为准。
 
 ## 只读页面作用域限制
 

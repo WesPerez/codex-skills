@@ -81,7 +81,7 @@
 - `credentials.chatgpt_account_id`：源 `account_id`
 - `credentials.account_id`：源 `account_id`
 - `credentials.expires_at`：从 `expired` 解析出的 Unix timestamp
-- `credentials.plan_type`：`k12`
+- `credentials.plan_type`：只复制源中的 `plan_type` / `chatgpt_plan_type`；源缺失时保持为空并阻止执行导入，不能仅因包名或论坛描述推断为 `k12`
 - `extra.source`：源 zip basename
 - `extra.source_entry`：原始 zip 条目路径
 - `extra.source_type`：源 `type`
@@ -112,9 +112,9 @@
 
 只有当去重明确属于任务时，才使用此身份函数：
 
-1. 当两者都存在时，使用精确的 `credentials.account_id` / `chatgpt_account_id` 加 `credentials.email`；
-2. 比较疑似完全重复文件时，使用精确 access token 前缀；
-3. 仅对分组 bundle 使用 `credentials.email` 或顶层 `email`，因为重复邮箱不应产生多个账号；
+1. 使用精确的 email、精确 account id 和完整 access token 组成复合身份；字段缺失时保留空位，不将同邮箱不同 account/token 合并；
+2. 比较疑似完全重复文件时使用完整 token 的内存比较，日志和 manifest 中绝不输出 token；
+3. 分组 bundle 也不得只按 email 去重；没有完整重复证据时保留条目；
 4. 没有更好身份字段时，使用顶层 `name`。
 
 原因：这里有两种相反的失败模式。有些 K12 dump 让许多不同用户共享同一个 ChatGPT workspace/account id，所以只看 account id 会合并掉有效账号。另一些 CPA zip 可以包含同一邮箱但不同 account id，所以只看邮箱也会合并掉有效账号。去重必须感知格式，并基于证据。

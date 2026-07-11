@@ -24,7 +24,7 @@ description: 安全验证 ChatGPT/OpenAI K12 workspace account UUID 的可用性
 
 - 默认只做 exchange-only 检查。除非用户在解释风险后明确要求那个具体动作，否则不要调用 `POST /backend-api/accounts/{id}/invites/request`、`DELETE /backend-api/accounts/{id}/users/{userId}`，不要导出凭据、复制 token，或运行会执行这些动作的 bookmarklet。
 - 除非用户明确授权，否则不要用用户日常登录的 ChatGPT 账号做 live check。优先使用隔离浏览器 profile 中的一次性/测试账号。
-- 记住，同一个 Edge InPrivate 窗口中的标签页共享一个临时 session。若要真正隔离，启动单独的 Edge profile，例如 `msedge --inprivate --user-data-dir=<temp-dir> --remote-debugging-port=<port> https://chatgpt.com/`，记录 PID/profile/port；除非明确由当前会话创建且安全可关闭，否则不要清理。
+- 记住，同一个 Edge InPrivate 窗口中的标签页共享一个临时 session。优先服从全局浏览器路由，使用官方浏览器插件和用户指定的隔离 profile。只有插件无法完成且用户明确选择 CDP 脚本时，才启动单独的临时 profile，并记录 PID/profile/port；除非明确由当前任务创建且安全可关闭，否则不要清理。
 - 永远不要打印 access token、refresh token、session token、cookies、完整邮箱或浏览器存储。只报告目标 ID、来源标签、状态、HTTP code、返回 account 前缀、plan 和简短备注。
 - exchange endpoint 可能改变该浏览器 session 中当前 ChatGPT workspace 上下文。捕获起始 account ID，并在可行时恢复。报告恢复失败或未尝试恢复的情况。
 - 未认证探测不是证明。如果真实 ID 和伪造 UUID 都返回相同的 `403` 或通用 HTML response，报告 `unauthenticated-inconclusive`。
@@ -47,7 +47,7 @@ description: 安全验证 ChatGPT/OpenAI K12 workspace account UUID 的可用性
    - 如果用户想知道“某个账号能否加入这个未知空间？”，解释证明需要 `invites/request`，并标记 `explicit-join-required`。
 
 4. 运行 exchange-only 检查。
-   - 当可通过 Chrome DevTools Protocol 访问 ChatGPT 页面时，使用内置脚本。
+   - 默认使用官方浏览器插件在明确的 `https://chatgpt.com/` 标签页执行。CDP 仅是显式选择的诊断后备路径；脚本找不到明确的 ChatGPT 页面时必须失败，不能退回任意页面。
    - 保持 `--restore-current` 启用，除非用户明确希望停留在最后一个成功 workspace。
    - 如果使用浏览器插件标签页而不是 CDP，遵循相同逻辑：先 `GET /api/auth/session`，然后对每个 ID 请求 `GET /api/auth/session?exchange_workspace_token=true&workspace_id=<id>&reason=setCurrentAccount`，只解码返回 JWT claims 中判断 `chatgpt_account_id` 和 plan 所需的信息，并隐去所有 token。
 
@@ -62,8 +62,8 @@ description: 安全验证 ChatGPT/OpenAI K12 workspace account UUID 的可用性
 对隔离 Edge/Chrome CDP port 运行确定性的 exchange-only 检查时，使用 `scripts/check_k12_workspaces.mjs`：
 
 ```powershell
-node C:\Users\DELL\.codex\skills\k12check\scripts\check_k12_workspaces.mjs `
-  --ids-file C:\Users\DELL\Desktop\K12\K12-ID.txt `
+node C:\Users\Wes\.codex\skills\k12check\scripts\check_k12_workspaces.mjs `
+  --ids-file C:\path\to\K12-ID.txt `
   --cdp http://127.0.0.1:9223
 ```
 

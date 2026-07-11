@@ -36,7 +36,7 @@ description: 为 Sub2API 准备、校验、转换、记录并导入 K12 OpenAI O
    - 对 CPA 单账号 zip 文件，默认保留每个 JSON 条目，因为同一邮箱可能映射到不同 `account_id`；
    - 只有在用户明确要求，或确认同一邮箱和同一 account id/token 是重复项时才去重；
    - 对分组 bundle zip，根据 `references/account_formats.md` 的规则谨慎去重。
-5. 校验每个生成的 bundle：
+5. 校验每个生成的 bundle。转换器不得凭来源文件名或任务上下文写入 `plan_type=k12`；只有源字段或另行验证的证据能提供该值：
    - `accounts` 存在且为列表；
    - `platform=openai`；
    - `type=oauth`；
@@ -59,7 +59,9 @@ description: 为 Sub2API 准备、校验、转换、记录并导入 K12 OpenAI O
 - `scripts/build_k12_bundle.py`：把分组 K12 bundle zip 条目合并为 recommended/all Sub2API bundle；如果源包分组名称不同，需要调整组名。
 - `scripts/import_sub2api_bundle.py`：通过 Sub2API admin API 预览/导入 Sub2API bundle。
 
-执行 `--execute` 前始终先跑 preview 模式。
+执行 `--execute` 前始终先跑纯本地 preview 模式。需要读取现有远程账号的 authenticated reconcile 是独立阶段，只能在明确授权执行时使用 `--skip-existing --execute`，不能伪装成无副作用 preview。
+
+执行导入必须声明 `--environment`。生产和未证明隔离的预发布禁止由脚本直接写入；开发/测试/本地还需要 `--confirm-write`，并在操作前确认账号范围、回滚方式和导入后校验。非 loopback 地址默认必须使用 HTTPS；`--allow-insecure-remote` 只适用于用户明确授权的隔离环境。
 
 ## 交付清单
 

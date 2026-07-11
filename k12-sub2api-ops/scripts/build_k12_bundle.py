@@ -3,6 +3,7 @@ import argparse
 import json
 import sys
 import zipfile
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -27,10 +28,11 @@ def account_key(account):
     credentials = account.get("credentials") or {}
     # K12 account dumps often share one ChatGPT workspace/account id across many
     # distinct OAuth users. Email/name/token are the real per-account identity.
-    for key in ("email",):
-        value = credentials.get(key) or account.get(key)
-        if value:
-            return f"{key}:{str(value).strip().lower()}"
+    email = str(credentials.get("email") or account.get("email") or "").strip().lower()
+    account_id = str(credentials.get("chatgpt_account_id") or credentials.get("account_id") or "").strip().lower()
+    token = str(credentials.get("access_token") or "")
+    if email or account_id or token:
+        return ("account", email, account_id, token)
     name = account.get("name")
     if name:
         return f"name:{str(name).strip().lower()}"
@@ -98,15 +100,20 @@ def build_bundle(zip_path, group_names):
     return bundle, manifest
 
 
-def write_json(path, data):
+def write_json(path, data, force=False):
+    if path.exists() and not force:
+        raise SystemExit(f"refusing to overwrite existing file without --force: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    if os.name != "nt":
+        path.chmod(0o600)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Build deduplicated sub2api bundles from the 1334 K12 zip.")
     parser.add_argument("--source-zip", required=True, help="Path to 1334个-不要去刷新令牌.zip")
     parser.add_argument("--out-dir", default="data", help="Output directory")
+    parser.add_argument("--force", action="store_true", help="Allow overwriting generated output files.")
     args = parser.parse_args()
 
     zip_path = Path(args.source_zip).expanduser().resolve()
@@ -121,8 +128,8 @@ def main():
     all_path = out_dir / "k12_sub2api_all_1334.json"
     manifest_path = out_dir / "k12_bundle_manifest.json"
 
-    write_json(recommended_path, recommended)
-    write_json(all_path, all_bundle)
+    write_json(recommended_path, recommended, args.force)
+    write_json(all_path, all_bundle, args.force)
     write_json(manifest_path, {
         "recommended": recommended_manifest,
         "all": all_manifest,
@@ -130,7 +137,7 @@ def main():
             "recommended": str(recommended_path),
             "all": str(all_path),
         },
-    })
+    }, args.force)
 
     print(json.dumps({
         "recommended_accounts": len(recommended["accounts"]),
