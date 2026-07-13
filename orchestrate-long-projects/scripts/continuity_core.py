@@ -13,7 +13,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import time
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 
 def utc_now() -> str:
@@ -291,12 +291,15 @@ def path_is_metadata(path: Optional[str], metadata_paths: Sequence[str]) -> bool
     return False
 
 
-def git_snapshot(repo: Path, output_dir: str, metadata_paths: Optional[Sequence[str]] = None) -> Dict[str, Any]:
-    metadata = list(metadata_paths or [output_dir])
+def _git_status_entries(
+    repo: Path,
+    metadata: Sequence[str],
+    untracked_mode: str,
+) -> Tuple[Dict[str, str], List[Dict[str, Any]]]:
     env = dict(os.environ)
     env["GIT_OPTIONAL_LOCKS"] = "0"
     completed = subprocess.run(
-        ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        ["git", "status", "--porcelain=v1", "-z", "--untracked-files=" + untracked_mode],
         cwd=str(repo),
         check=True,
         stdout=subprocess.PIPE,
@@ -338,16 +341,171 @@ def git_snapshot(repo: Path, output_dir: str, metadata_paths: Optional[Sequence[
             and path_is_metadata(item.get("destinationPath"), metadata)
         )
     ]
+    return env, product_entries
+
+
+def _dirty_file_signatures(repo: Path, product_entries: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     product_files: List[Dict[str, Any]] = []
     for entry in product_entries:
         destination = repo / entry["destinationPath"]
         item: Dict[str, Any] = {"path": entry["displayPath"], "exists": destination.exists()}
+        if destination.exists() or destination.is_symlink():
+            item["mode"] = destination.lstat().st_mode
         if destination.is_symlink():
             target = os.readlink(str(destination))
             item.update({"symlinkTarget": target, "sha256": hashlib.sha256(target.encode("utf-8", errors="surrogateescape")).hexdigest()})
         elif destination.is_file():
             item.update({"sha256": file_sha256(destination), "size": destination.stat().st_size})
+        elif destination.is_dir():
+            item["kind"] = "tracked-directory-or-submodule"
+            try:
+                nested = git_snapshot(destination, "__submodule_metadata__")
+                item["submoduleSnapshot"] = {
+                    key: nested.get(key)
+                    for key in (
+                        "branch",
+                        "observedHead",
+                        "upstreamHead",
+                        "dirtyPaths",
+                        "dirtyEntries",
+                        "indexDiffSha256",
+                        "worktreeDiffSha256",
+                        "indexEntriesSha256",
+                        "fastWorkingTreeFingerprint",
+                        "workingTreeFingerprint",
+                    )
+                }
+            except Exception as exc:
+                item["submoduleSnapshotError"] = "{}: {}".format(type(exc).__name__, exc)
         product_files.append(item)
+    return product_files
+
+
+def _fast_git_payload(
+    branch: str,
+    head: str,
+    product_entries: Sequence[Dict[str, Any]],
+    product_files: Sequence[Dict[str, Any]],
+    metadata: Sequence[str],
+    targeted_index_sha256: str,
+) -> Dict[str, Any]:
+    return {
+        "branch": branch,
+        "head": head,
+        "entries": list(product_entries),
+        "files": list(product_files),
+        "metadataPaths": list(metadata),
+        "targetedIndexEntriesSha256": targeted_index_sha256,
+    }
+
+
+def _targeted_index_sha256(
+    repo: Path,
+    product_entries: Sequence[Dict[str, Any]],
+    env: Dict[str, str],
+) -> str:
+    product_paths = sorted({
+        path
+        for entry in product_entries
+        for path in (entry.get("sourcePath"), entry.get("destinationPath"))
+        if path
+    })
+    if not product_paths:
+        return hashlib.sha256(b"").hexdigest()
+    raw = subprocess.run(
+        ["git", "--literal-pathspecs", "ls-files", "--stage", "-z", "--"] + product_paths,
+        cwd=str(repo),
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+    ).stdout
+    return _index_records_sha256(raw)
+
+
+def _index_records_sha256(raw: bytes) -> str:
+    records = sorted(record for record in raw.split(b"\0") if record)
+    return hashlib.sha256(b"\0".join(records)).hexdigest()
+
+
+def git_fast_snapshot(
+    repo: Path,
+    output_dir: str,
+    metadata_paths: Optional[Sequence[str]] = None,
+    max_paths: int = 128,
+) -> Dict[str, Any]:
+    metadata = list(metadata_paths or [output_dir])
+    env, product_entries = _git_status_entries(repo, metadata, "normal")
+    filtered_entries = []
+    for entry in product_entries:
+        status = str(entry.get("status") or "")
+        destination = str(entry.get("destinationPath") or "")
+        directory = repo / destination
+        if status == "??" and directory.is_dir() and not directory.is_symlink():
+            children = []
+            for path in directory.rglob("*"):
+                if path.is_file() or path.is_symlink():
+                    children.append(path)
+                    if len(children) > max_paths:
+                        break
+            relative_children = [repo_relative(repo, path) for path in children]
+            if len(children) <= max_paths and relative_children and all(path_is_metadata(path, metadata) for path in relative_children):
+                continue
+        filtered_entries.append(entry)
+    product_entries = filtered_entries
+    head = run_git(repo, "rev-parse", "HEAD")
+    branch = run_git(repo, "branch", "--show-current", allow_failure=True) or "DETACHED"
+    ambiguity_reasons = []
+    if len(product_entries) > max_paths:
+        ambiguity_reasons.append("dirty path 数量超过 fast 上限 {}".format(max_paths))
+    for entry in product_entries:
+        status = str(entry.get("status") or "")
+        destination = str(entry.get("destinationPath") or "")
+        if "R" in status or "C" in status:
+            ambiguity_reasons.append("fast 不验证 rename/copy: {}".format(entry.get("displayPath")))
+        if status != "??" and (repo / destination).is_dir():
+            ambiguity_reasons.append("fast 不验证 tracked directory/submodule: {}".format(destination))
+        if status == "??" and (destination.endswith("/") or (repo / destination).is_dir()):
+            ambiguity_reasons.append("fast 不展开未跟踪目录: {}".format(destination))
+    if ambiguity_reasons:
+        return {
+            "capturedAt": utc_now(),
+            "branch": branch,
+            "observedHead": head,
+            "dirtyPaths": [item["displayPath"] for item in product_entries],
+            "dirtyEntries": product_entries,
+            "metadataPaths": metadata,
+            "fastWorkingTreeFingerprint": None,
+            "ambiguous": True,
+            "ambiguityReasons": sorted(set(ambiguity_reasons)),
+        }
+    product_files = _dirty_file_signatures(repo, product_entries)
+    targeted_index_sha256 = _targeted_index_sha256(repo, product_entries, env)
+    fast_payload = _fast_git_payload(
+        branch,
+        head,
+        product_entries,
+        product_files,
+        metadata,
+        targeted_index_sha256,
+    )
+    return {
+        "capturedAt": utc_now(),
+        "branch": branch,
+        "observedHead": head,
+        "dirtyPaths": [item["displayPath"] for item in product_entries],
+        "dirtyEntries": product_entries,
+        "metadataPaths": metadata,
+        "fastWorkingTreeFingerprint": "sha256:" + hashlib.sha256(canonical_json(fast_payload).encode("utf-8")).hexdigest(),
+        "ambiguous": False,
+        "ambiguityReasons": [],
+    }
+
+
+def git_snapshot(repo: Path, output_dir: str, metadata_paths: Optional[Sequence[str]] = None) -> Dict[str, Any]:
+    metadata = list(metadata_paths or [output_dir])
+    env, product_entries = _git_status_entries(repo, metadata, "all")
+    product_files = _dirty_file_signatures(repo, product_entries)
     head = run_git(repo, "rev-parse", "HEAD")
     branch = run_git(repo, "branch", "--show-current", allow_failure=True) or "DETACHED"
     upstream = run_git(repo, "rev-parse", "@{upstream}", allow_failure=True)
@@ -385,6 +543,7 @@ def git_snapshot(repo: Path, output_dir: str, metadata_paths: Optional[Sequence[
         env=env,
     ).stdout
     filtered_index_entries = []
+    targeted_index_entries = []
     for raw_record in raw_index_entries.split(b"\0"):
         if not raw_record:
             continue
@@ -395,7 +554,18 @@ def git_snapshot(repo: Path, output_dir: str, metadata_paths: Optional[Sequence[
         decoded_path = safe_git_text(raw_path.decode("utf-8", errors="surrogateescape"))
         if not path_is_metadata(decoded_path, metadata):
             filtered_index_entries.append(raw_record)
+            if decoded_path in product_paths:
+                targeted_index_entries.append(raw_record)
     index_entries = b"\0".join(sorted(filtered_index_entries))
+    targeted_index_sha256 = _index_records_sha256(b"\0".join(targeted_index_entries))
+    fast_payload = _fast_git_payload(
+        branch,
+        head,
+        product_entries,
+        product_files,
+        metadata,
+        targeted_index_sha256,
+    )
     fingerprint_payload = {
         "branch": branch,
         "head": head,
@@ -408,6 +578,7 @@ def git_snapshot(repo: Path, output_dir: str, metadata_paths: Optional[Sequence[
         "metadataPaths": metadata,
     }
     return {
+        "capturedAt": utc_now(),
         "branch": branch,
         "observedHead": head,
         "upstreamHead": upstream,
@@ -417,6 +588,7 @@ def git_snapshot(repo: Path, output_dir: str, metadata_paths: Optional[Sequence[
         "worktreeDiffSha256": hashlib.sha256(worktree_diff).hexdigest(),
         "indexEntriesSha256": hashlib.sha256(index_entries).hexdigest(),
         "metadataPaths": metadata,
+        "fastWorkingTreeFingerprint": "sha256:" + hashlib.sha256(canonical_json(fast_payload).encode("utf-8")).hexdigest(),
         "workingTreeFingerprint": "sha256:" + hashlib.sha256(canonical_json(fingerprint_payload).encode("utf-8")).hexdigest(),
     }
 
@@ -488,6 +660,7 @@ def evidence_current(
     state: Dict[str, Any],
     repo: Optional[Path] = None,
     profiles: Optional[Dict[str, Dict[str, Any]]] = None,
+    verify_artifacts: bool = True,
 ) -> bool:
     if record.get("status") != "passed":
         return False
@@ -523,6 +696,8 @@ def evidence_current(
                 return False
         except (TypeError, ValueError):
             return False
+    if not verify_artifacts:
+        return True
     for artifact in record.get("artifacts", []):
         if not artifact.get("required"):
             continue
@@ -549,7 +724,10 @@ def render_status(
     active = state.get("activeSlice", {})
     git = state.get("git", {})
     checkpoint = state.get("lastCheckpoint") or {}
-    current_evidence = [record for record in evidence if evidence_current(record, state, repo, profiles)]
+    current_evidence = [
+        record for record in evidence
+        if evidence_current(record, state, repo, profiles, verify_artifacts=False)
+    ]
     latest_evidence = current_evidence[-1] if current_evidence else None
     action = state.get("inFlightAction")
     next_action = (
@@ -597,10 +775,11 @@ def render_status(
         "- 状态：phase=`{}`；slice=`{}`；action=`{}`".format(state.get("activePhase", {}).get("status"), active.get("status"), state.get("actionStatus")),
         "- 当前切片验收：`{}/{}`".format(passed, len(criteria)),
         "- 未决副作用：{}".format("`{}`".format(action.get("actionId")) if action else "none"),
-        "- 最新当前有效证据：{}".format("{} ({})".format(latest_evidence.get("claim"), latest_evidence.get("id")) if latest_evidence else "none"),
+        "- 最新源码绑定证据：{}".format("{} ({})".format(latest_evidence.get("claim"), latest_evidence.get("id")) if latest_evidence else "none"),
         "- 唯一下一动作：{}".format(next_action),
         "- 首要 blocker：{}".format((state.get("resume", {}).get("blockers") or ["none"])[0]),
         "- observed/verified/upstream：`{}` / `{}` / `{}`".format(git.get("observedHead"), git.get("verifiedHead"), git.get("upstreamHead")),
+        "- 最近 Git 观测：`{}`".format(git.get("capturedAt")),
         "- 工作树指纹：`{}`".format(git.get("workingTreeFingerprint")),
         "- 最新 checkpoint：`{}`；safeToResume=`{}`；safeToRunLive=`{}`".format(checkpoint.get("id", "none"), str(checkpoint.get("safeToResume", False)).lower(), str(checkpoint.get("safeToRunLive", False)).lower()),
         "- 技术门禁（不等于用户授权）：canEdit=`{}`；canStartSideEffect=`{}`；canRunLive=`{}`".format(
@@ -626,14 +805,14 @@ def render_status(
     for key, value in state.get("projectVerification", {}).items():
         lines.append("| `{}` | `{}` | {} |".format(md_cell(key), md_cell(value.get("status")), md_cell(value.get("note", ""))))
     lines.extend(["", "## 恢复", ""])
-    lines.extend(md_list(state.get("resume", {}).get("nextCommands", []), "先运行 continuity audit 和 git status --short；仅按具体风险路径检查 ignored 产物"))
+    lines.extend(md_list(state.get("resume", {}).get("nextCommands", []), "先运行 fast resume-check；异常或交接/完成前再运行 full audit"))
     lines.extend(["", "### 禁止盲目执行", ""])
     lines.extend(md_list(state.get("resume", {}).get("doNotDo", [])))
     lines.extend(["", "## 最近事件", "", "| seq | 时间 | 类型 | 摘要 |", "|---:|---|---|---|"])
     for event in events[-10:]:
         lines.append("| {} | `{}` | `{}` | {} |".format(event.get("seq"), md_cell(event.get("timestamp")), md_cell(event.get("eventType")), md_cell(event.get("summary"))))
-    lines.extend(["", "## 最近证据", "", "| ID | 类别 | 结果 | 当前绑定 | 结论 |", "|---|---|---|---|---|"])
+    lines.extend(["", "## 最近证据", "", "> 当前绑定表示源码、profile、签名和 TTL 一致；完整 artifact 有效性由 full audit 校验。", "", "| ID | 类别 | 结果 | 当前绑定 | 结论 |", "|---|---|---|---|---|"])
     for record in evidence[-10:]:
-        lines.append("| `{}` | `{}` | `{}` | `{}` | {} |".format(record.get("id"), md_cell(record.get("category")), md_cell(record.get("status")), "valid" if evidence_current(record, state, repo, profiles) else "stale/invalid", md_cell(record.get("claim"))))
+        lines.append("| `{}` | `{}` | `{}` | `{}` | {} |".format(record.get("id"), md_cell(record.get("category")), md_cell(record.get("status")), "valid" if evidence_current(record, state, repo, profiles, verify_artifacts=False) else "stale/invalid", md_cell(record.get("claim"))))
     lines.append("")
     return "\n".join(lines)

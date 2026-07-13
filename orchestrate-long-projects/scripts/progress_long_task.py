@@ -23,6 +23,7 @@ from continuity_core import (
     ensure_git_root,
     evidence_current,
     file_sha256,
+    git_fast_snapshot,
     git_private_path,
     git_snapshot,
     ledger_record,
@@ -112,6 +113,9 @@ class Context(object):
     def snapshot(self, state: Dict[str, Any]) -> Dict[str, Any]:
         return git_snapshot(self.repo, self.output_rel, self.metadata_paths(state))
 
+    def fast_snapshot(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        return git_fast_snapshot(self.repo, self.output_rel, self.metadata_paths(state))
+
 
 def normalize_relative(value: str, label: str = "path") -> str:
     normalized = value.replace("\\", "/").rstrip("/")
@@ -181,6 +185,8 @@ def persist(
     evidence: List[Dict[str, Any]],
     event: Optional[Dict[str, Any]] = None,
     evidence_record: Optional[Dict[str, Any]] = None,
+    snapshot: Optional[Dict[str, Any]] = None,
+    refresh_git: bool = False,
 ) -> None:
     if evidence_record is not None:
         append_jsonl(context.evidence_path, evidence_record)
@@ -190,11 +196,12 @@ def persist(
         events.append(event)
     state["eventTail"] = ledger_tail(events)
     state["evidenceTail"] = ledger_tail(evidence)
-    verified = state.get("git", {}).get("verifiedHead")
-    verified_evidence = list(state.get("git", {}).get("verifiedByEvidenceIds") or [])
-    state["git"] = context.snapshot(state)
-    state["git"]["verifiedHead"] = verified
-    state["git"]["verifiedByEvidenceIds"] = verified_evidence
+    if snapshot is not None or refresh_git:
+        verified = state.get("git", {}).get("verifiedHead")
+        verified_evidence = list(state.get("git", {}).get("verifiedByEvidenceIds") or [])
+        state["git"] = snapshot if snapshot is not None else context.snapshot(state)
+        state["git"]["verifiedHead"] = verified
+        state["git"]["verifiedByEvidenceIds"] = verified_evidence
     state["revision"] = int(state.get("revision", 0)) + 1
     state["updatedAt"] = utc_now()
     atomic_write_json(context.state_path, state)
@@ -267,7 +274,7 @@ def command_render(context: Context, _: argparse.Namespace) -> int:
         state, events, evidence = context.load(allow_tail_drift=True)
         if state.get("eventTail") != ledger_tail(events) or state.get("evidenceTail") != ledger_tail(evidence):
             raise RuntimeError("账本 tail 漂移；先运行 reconcile")
-        persist(context, state, events, evidence)
+        persist(context, state, events, evidence, refresh_git=True)
     print("已刷新 state Git 投影和 STATUS")
     return 0
 
@@ -498,7 +505,15 @@ def command_run_evidence(context: Context, args: argparse.Namespace) -> int:
                 verifiedByEvidenceIds=verified_evidence,
             )
         event = create_event(state, events, "test_run", "{}: {}".format(status, args.claim), [evidence_record["id"]])
-        persist(context, state, events, evidence, event=event, evidence_record=evidence_record)
+        persist(
+            context,
+            state,
+            events,
+            evidence,
+            event=event,
+            evidence_record=evidence_record,
+            snapshot=snapshot,
+        )
     print("{} {}；exit={}；log={}".format(evidence_record["id"], status, exit_code, log_path))
     return 0 if status == "passed" else 1
 
@@ -554,7 +569,7 @@ def command_project_state(context: Context, args: argparse.Namespace) -> int:
             "decision",
             "更新项目状态 -> {}：{}".format(args.status, args.summary),
         )
-        persist(context, state, events, evidence, event=event)
+        persist(context, state, events, evidence, event=event, refresh_git=(args.status == "completed"))
     print("已更新项目状态 -> {}".format(args.status))
     return 0
 
@@ -635,7 +650,7 @@ def command_action_start(context: Context, args: argparse.Namespace) -> int:
             "开始副作用 {} -> {}".format(args.action_id, args.target),
             extra={"action": dict(action)},
         )
-        persist(context, state, events, evidence, event=event)
+        persist(context, state, events, evidence, event=event, refresh_git=True)
     print("已记录 intent {}；执行前仍需用户授权、checkpoint 和项目专用控制门".format(args.action_id))
     return 0
 
@@ -807,7 +822,7 @@ def command_reconcile(context: Context, args: argparse.Namespace) -> int:
             args.summary,
             extra={"action": dict(state["inFlightAction"])} if state.get("inFlightAction") else None,
         )
-        persist(context, state, events, evidence, event=event)
+        persist(context, state, events, evidence, event=event, refresh_git=True)
     print("已完成 reconciliation；未决 unknown 动作仍保持阻塞")
     return 0
 
@@ -847,6 +862,11 @@ def command_resume_check(context: Context, args: argparse.Namespace) -> int:
         report = {
             "decision": decision,
             "reasons": reasons,
+            "warnings": ["light 模式请直接读取 STATUS 并运行一次 git status --short"],
+            "checkLevel": "light",
+            "needsFullAudit": bool(reasons),
+            "evidenceFreshness": "not_checked",
+            "passedGateEvidenceFreshness": "not_checked",
             "phase": None,
             "slice": None,
             "nextAction": next_action,
@@ -863,26 +883,53 @@ def command_resume_check(context: Context, args: argparse.Namespace) -> int:
             for reason in reasons:
                 print("- " + reason)
             if not reasons:
-                print("- 轻量模式无机器 state；继续前仍需完整 audit、Git 核验和用户 repo_write 授权")
+                print("- 轻量模式无机器 state；请直接核对一次 Git 状态和用户 repo_write 授权")
                 print("- 下一动作: {}".format(next_action))
         return 0 if not reasons else 3
 
     paths = [context.state_path, context.status_path, context.events_path, context.evidence_path, context.profiles_path]
     before = file_signature(paths)
     reasons: List[str] = []
+    warnings: List[str] = []
+    needs_full_audit = False
     next_action = None
     try:
         state, events, evidence = context.load(allow_tail_drift=True)
         if state.get("eventTail") != ledger_tail(events):
             reasons.append("event tail 漂移")
+            needs_full_audit = True
         if state.get("evidenceTail") != ledger_tail(evidence):
             reasons.append("evidence tail 漂移")
-        snapshot = context.snapshot(state)
-        if state.get("git", {}).get("workingTreeFingerprint") != snapshot.get("workingTreeFingerprint") or state.get("git", {}).get("observedHead") != snapshot.get("observedHead"):
-            reasons.append("Git/工作树与 state 不一致")
+            needs_full_audit = True
+        if args.full:
+            snapshot = context.snapshot(state)
+            if (
+                state.get("git", {}).get("workingTreeFingerprint") != snapshot.get("workingTreeFingerprint")
+                or state.get("git", {}).get("observedHead") != snapshot.get("observedHead")
+            ):
+                reasons.append("Git/工作树与 state 不一致")
+                needs_full_audit = True
+        else:
+            snapshot = context.fast_snapshot(state)
+            stored_fast = state.get("git", {}).get("fastWorkingTreeFingerprint")
+            if snapshot.get("ambiguous"):
+                reasons.extend("fast Git 检查不确定: " + item for item in snapshot.get("ambiguityReasons", []))
+                needs_full_audit = True
+            elif not stored_fast:
+                reasons.append("旧台账缺少 fast Git 指纹；先运行 full audit 诊断，确认仅缺字段后在 repo_write 下执行 render 迁移")
+                needs_full_audit = True
+            elif (
+                state.get("git", {}).get("observedHead") != snapshot.get("observedHead")
+                or state.get("git", {}).get("branch") != snapshot.get("branch")
+                or stored_fast != snapshot.get("fastWorkingTreeFingerprint")
+            ):
+                reasons.append("fast Git 指纹与 state 不一致")
+                needs_full_audit = True
         action = state.get("inFlightAction")
         if action:
             reasons.append("存在未决动作 {} ({})".format(action.get("actionId"), action.get("status")))
+            if action.get("status") in {"running", "unknown_after_interruption"}:
+                needs_full_audit = True
         for blocker in state.get("resume", {}).get("blockers", []):
             reasons.append("blocker: {}".format(blocker))
         next_action = state.get("activeSlice", {}).get("nextAction")
@@ -897,17 +944,22 @@ def command_resume_check(context: Context, args: argparse.Namespace) -> int:
         checkpoint_path = safe_repo_path(context.repo, str(checkpoint.get("path") or ""), "lastCheckpoint.path")
         if not checkpoint_path.is_file():
             reasons.append("最新 checkpoint 文件缺失")
+            needs_full_audit = True
         else:
             checkpoint_value = load_json(checkpoint_path)
             if checkpoint_value.get("hash") != checkpoint.get("hash") or checkpoint_value.get("hash") != object_hash(checkpoint_value):
                 reasons.append("最新 checkpoint hash 不一致")
+                needs_full_audit = True
             if checkpoint.get("permissions") != checkpoint_value.get("permissions"):
                 reasons.append("最新 checkpoint 技术门禁投影不一致")
+                needs_full_audit = True
             technical = checkpoint_value.get("permissions") or {}
             if not all(isinstance(technical.get(key), bool) for key in ("safeToResume", "canEdit", "canStartSideEffect", "canRunLive")):
                 reasons.append("最新 checkpoint 技术门禁不是 boolean")
+                needs_full_audit = True
             if checkpoint.get("safeToResume") != checkpoint_value.get("safeToResume") or checkpoint.get("safeToRunLive") != checkpoint_value.get("safeToRunLive"):
                 reasons.append("最新 checkpoint safe flags 投影不一致")
+                needs_full_audit = True
         checkpoint_ids = []
         if context.checkpoint_dir.is_dir():
             for path in context.checkpoint_dir.glob("CP-*.json"):
@@ -916,29 +968,42 @@ def command_resume_check(context: Context, args: argparse.Namespace) -> int:
                     checkpoint_ids.append((int(match.group(1)), "CP-{:04d}".format(int(match.group(1)))))
         if checkpoint_ids and checkpoint.get("id") != max(checkpoint_ids)[1]:
             reasons.append("lastCheckpoint 未指向编号最高的 checkpoint")
-        evidence_by_id = {record.get("id"): record for record in evidence}
-        for gate_name, gate in state.get("projectVerification", {}).items():
-            if gate.get("status") == "passed":
-                allowed = gate.get("allowedCategories") or []
-                records = [evidence_by_id.get(item, {}) for item in gate.get("evidenceIds", [])]
-                if not records or not all(
-                    evidence_current(record, state, context.repo, profiles)
-                    and record.get("category") in allowed
-                    for record in records
-                ):
-                    reasons.append("passed gate {} 的 evidence 已失效".format(gate_name))
+            needs_full_audit = True
+        if args.full:
+            evidence_by_id = {record.get("id"): record for record in evidence}
+            for gate_name, gate in state.get("projectVerification", {}).items():
+                if gate.get("status") == "passed":
+                    allowed = gate.get("allowedCategories") or []
+                    records = [evidence_by_id.get(item, {}) for item in gate.get("evidenceIds", [])]
+                    if not records or not all(
+                        evidence_current(record, state, context.repo, profiles)
+                        and record.get("category") in allowed
+                        for record in records
+                    ):
+                        reasons.append("passed gate {} 的 evidence 已失效".format(gate_name))
+                        needs_full_audit = True
+        else:
+            warnings.append("fast check 未重验 artifact、全部 gate evidence 或历史 checkpoint")
         if context.status_path.read_text(encoding="utf-8") != render_status(state, events, evidence, context.repo, profiles):
             reasons.append("STATUS 投影不一致")
+            needs_full_audit = True
     except Exception as exc:
         state = {}
         reasons.append("读取失败: {}".format(exc))
+        needs_full_audit = True
     after = file_signature(paths)
     if before != after:
         reasons.append("读取期间状态并发变化")
+        needs_full_audit = True
     decision = "blocked" if reasons else "safe_for_code_only"
     report = {
         "decision": decision,
         "reasons": reasons,
+        "warnings": warnings,
+        "checkLevel": "full" if args.full else "fast",
+        "needsFullAudit": needs_full_audit,
+        "evidenceFreshness": "passed_gates_checked" if args.full else "not_checked",
+        "passedGateEvidenceFreshness": "checked" if args.full else "not_checked",
         "phase": state.get("activePhase", {}).get("id") if state else None,
         "slice": state.get("activeSlice", {}).get("id") if state else None,
         "nextAction": next_action,
@@ -954,6 +1019,8 @@ def command_resume_check(context: Context, args: argparse.Namespace) -> int:
         print("resume-check: {}".format(decision))
         for reason in reasons:
             print("- " + reason)
+        for warning in warnings:
+            print("- WARN: " + warning)
         if not reasons:
             print("- 技术上可继续代码/文档切片；这不等于用户 repo_write 授权")
             print("- 真实副作用仍需独立用户授权和项目专用门禁")
@@ -971,6 +1038,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("render", help="刷新 Git 投影和 STATUS")
     resume = subparsers.add_parser("resume-check", help="只读恢复判断，不写文件")
     resume.add_argument("--json", action="store_true")
+    resume.add_argument("--full", action="store_true", help="重验完整 Git 指纹和 passed gate 关联 artifact；最终权威门禁仍使用 audit_long_task.py")
 
     note = subparsers.add_parser("note", help="记录重要事件")
     note.add_argument("--type", choices=sorted(EVENT_TYPES), default="note")

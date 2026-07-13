@@ -499,7 +499,7 @@ def main() -> int:
         except Exception as exc:
             errors.append("metadata path 无效: {}".format(exc))
     snapshot = git_snapshot(repo, output_rel, metadata_paths)
-    for key in ("branch", "observedHead", "upstreamHead", "dirtyPaths", "dirtyEntries", "indexDiffSha256", "worktreeDiffSha256", "indexEntriesSha256", "metadataPaths", "workingTreeFingerprint"):
+    for key in ("branch", "observedHead", "upstreamHead", "dirtyPaths", "dirtyEntries", "indexDiffSha256", "worktreeDiffSha256", "indexEntriesSha256", "metadataPaths", "fastWorkingTreeFingerprint", "workingTreeFingerprint"):
         if state.get("git", {}).get(key) != snapshot.get(key):
             errors.append("state.git.{} 与当前 Git 不一致".format(key))
 

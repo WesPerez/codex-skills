@@ -1,4 +1,6 @@
 interface:
-  display_name: "技能改进器"
-  short_description: "按风险选择最低充分证据，避免技能验证过度耗时"
-  default_prompt: "使用 $skill-improver 按风险和信息增益选择验证证据，并改进一个 Codex 技能。"
+  display_name: "技能行为验证门禁"
+  short_description: "显式验证技能运行行为、安全边界和复杂交接"
+  default_prompt: "使用 $skill-improver 只验证本次受影响的运行行为或安全边界；普通结构和文本修改交给 skill-creator，低层证据足够时立即停止。"
+policy:
+  allow_implicit_invocation: false

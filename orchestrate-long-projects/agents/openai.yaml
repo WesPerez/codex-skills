@@ -1,4 +1,4 @@
 interface:
   display_name: "长任务项目编排"
-  short_description: "审计、实施或恢复复杂项目，并按需维护可验证的连续性台账"
-  default_prompt: "使用 $orchestrate-long-projects 先只读判断工作入口、用户授权、外部副作用范围和复杂度，再按需完成审计、方案、实施、进度核验或中断恢复；只有获得对应写入授权且确有需要时才建立台账。"
+  short_description: "维护跨会话项目的最小可恢复状态、交接和副作用对账"
+  default_prompt: "使用 $orchestrate-long-projects 先判断是否真的需要跨会话连续性；自包含任务立即退出本技能。已有台账时 fast-first 恢复，只有异常、高风险动作、handoff 或最终交付才升级完整审计。"

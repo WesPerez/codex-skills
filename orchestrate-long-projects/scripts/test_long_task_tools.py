@@ -12,12 +12,15 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 import bootstrap_long_task as bootstrap
-from continuity_core import git_snapshot, ledger_record, load_json, load_jsonl, object_hash, render_status, utc_now
+import continuity_core as core
+import progress_long_task as progress
+from continuity_core import git_fast_snapshot, git_snapshot, ledger_record, load_json, load_jsonl, object_hash, render_status, utc_now
 
 
 def run(command, cwd, expected=0):
@@ -140,9 +143,9 @@ class LongTaskToolsTest(unittest.TestCase):
             custom_args = ["--output-dir", "操作 台账/ledger", "--plan-path", "操作 台账/主 方案.md"]
             run(bootstrap_command(light, "light", custom_args), light)
             agents = (light / "AGENTS.md").read_text(encoding="utf-8")
-            self.assertIn("python -B", agents)
-            self.assertIn('--output-dir "操作 台账/ledger"', agents)
-            self.assertIn('--plan-path "操作 台账/主 方案.md"', agents)
+            self.assertNotIn("progress_long_task.py", agents)
+            self.assertIn("操作 台账/ledger/STATUS.md", agents)
+            self.assertIn("操作 台账/主 方案.md", agents)
             self.assertIn("git --no-optional-locks status --short", agents)
             status_path = light / "操作 台账" / "ledger" / "STATUS.md"
             lines = [
@@ -347,7 +350,7 @@ class LongTaskToolsTest(unittest.TestCase):
             profile_path.write_text(json.dumps(profile, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             output = run(audit_command(repo), repo, expected=1)
             self.assertIn("profileDigest", output)
-            output = run(progress_command(repo, "resume-check"), repo, expected=3)
+            output = run(progress_command(repo, "resume-check", "--full"), repo, expected=3)
             self.assertIn("evidence 已失效", output)
 
     def test_evidence_fails_when_product_changes_during_run(self):
@@ -524,6 +527,137 @@ class LongTaskToolsTest(unittest.TestCase):
             self.assertFalse((repo / "AGENTS.md").exists())
             self.assertTrue((repo / "docs" / "project-master-plan.md").is_file())
             self.assertTrue((repo / "docs" / "execution" / "STATUS.md").is_file())
+
+    def test_fast_snapshot_avoids_full_diff_and_global_index_scan(self):
+        with tempfile.TemporaryDirectory(prefix="olp-fast-commands-") as temp:
+            repo = init_repo(Path(temp) / "repo")
+            product = repo / "product.txt"
+            product.write_text("one\n", encoding="utf-8")
+            git(repo, "add", "product.txt")
+            git(repo, "commit", "-m", "product")
+            product.write_text("two\n", encoding="utf-8")
+            calls = []
+            original_run = core.subprocess.run
+
+            def tracking_run(command, *args, **kwargs):
+                calls.append(list(command))
+                return original_run(command, *args, **kwargs)
+
+            with mock.patch.object(core.subprocess, "run", side_effect=tracking_run):
+                snapshot = git_fast_snapshot(repo, "docs/execution", ["docs/execution", "docs/project-master-plan.md", "AGENTS.md"])
+            self.assertFalse(snapshot["ambiguous"])
+            self.assertFalse(any("diff" in command for command in calls))
+            self.assertFalse(any(command[:4] == ["git", "ls-files", "--stage", "-z"] for command in calls))
+            self.assertTrue(any("ls-files" in command and "--literal-pathspecs" in command for command in calls))
+
+    def test_fast_resume_detects_changes_inside_existing_dirty_file(self):
+        with tempfile.TemporaryDirectory(prefix="olp-fast-dirty-") as temp:
+            repo = init_repo(Path(temp) / "repo")
+            product = repo / "product.txt"
+            product.write_text("base\n", encoding="utf-8")
+            git(repo, "add", "product.txt")
+            git(repo, "commit", "-m", "product")
+            product.write_text("dirty-one\n", encoding="utf-8")
+            run(bootstrap_command(repo), repo)
+            run(progress_command(repo, "resume-check"), repo)
+            product.write_text("dirty-two\n", encoding="utf-8")
+            output = run(progress_command(repo, "resume-check"), repo, expected=3)
+            self.assertIn("fast Git 指纹与 state 不一致", output)
+
+    def test_fast_resume_requires_full_for_untracked_directory(self):
+        with tempfile.TemporaryDirectory(prefix="olp-fast-untracked-dir-") as temp:
+            repo = init_repo(Path(temp) / "repo")
+            run(bootstrap_command(repo), repo)
+            nested = repo / "new-dir"
+            nested.mkdir()
+            (nested / "item.txt").write_text("new\n", encoding="utf-8")
+            output = run(progress_command(repo, "resume-check"), repo, expected=3)
+            self.assertIn("fast 不展开未跟踪目录", output)
+
+    def test_dirty_submodule_requires_full_and_full_fingerprint_tracks_changes(self):
+        with tempfile.TemporaryDirectory(prefix="olp-fast-submodule-") as temp:
+            base = Path(temp)
+            child = init_repo(base / "child")
+            child_file = child / "item.txt"
+            child_file.write_text("base\n", encoding="utf-8")
+            git(child, "add", "item.txt")
+            git(child, "commit", "-m", "child")
+
+            repo = init_repo(base / "repo")
+            git(repo, "-c", "protocol.file.allow=always", "submodule", "add", str(child), "deps/child")
+            git(repo, "add", ".gitmodules", "deps/child")
+            git(repo, "commit", "-m", "submodule")
+            nested_file = repo / "deps" / "child" / "item.txt"
+            nested_file.write_text("dirty-one\n", encoding="utf-8")
+
+            fast = git_fast_snapshot(repo, "docs/execution", ["docs/execution", "docs/project-master-plan.md", "AGENTS.md"])
+            self.assertTrue(fast["ambiguous"])
+            self.assertTrue(any("tracked directory/submodule" in item for item in fast["ambiguityReasons"]))
+
+            first = git_snapshot(repo, "docs/execution", ["docs/execution", "docs/project-master-plan.md", "AGENTS.md"])
+            nested_file.write_text("dirty-two\n", encoding="utf-8")
+            second = git_snapshot(repo, "docs/execution", ["docs/execution", "docs/project-master-plan.md", "AGENTS.md"])
+            self.assertNotEqual(first["workingTreeFingerprint"], second["workingTreeFingerprint"])
+
+    def test_legacy_state_needs_full_refresh_before_fast_resume(self):
+        with tempfile.TemporaryDirectory(prefix="olp-fast-legacy-") as temp:
+            repo = init_repo(Path(temp) / "repo")
+            run(bootstrap_command(repo), repo)
+            state_path = repo / "docs" / "execution" / "state.json"
+            state = load_json(state_path)
+            state["git"].pop("fastWorkingTreeFingerprint", None)
+            state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            output = run(progress_command(repo, "resume-check"), repo, expected=3)
+            self.assertIn("旧台账缺少 fast Git 指纹", output)
+            run(progress_command(repo, "render"), repo)
+            refreshed = load_json(state_path)
+            self.assertTrue(refreshed["git"].get("fastWorkingTreeFingerprint"))
+            run(progress_command(repo, "resume-check"), repo)
+
+    def test_note_does_not_refresh_full_git_snapshot(self):
+        with tempfile.TemporaryDirectory(prefix="olp-note-no-snapshot-") as temp:
+            repo = init_repo(Path(temp) / "repo")
+            product = repo / "product.txt"
+            product.write_text("base\n", encoding="utf-8")
+            git(repo, "add", "product.txt")
+            git(repo, "commit", "-m", "product")
+            run(bootstrap_command(repo), repo)
+            state_path = repo / "docs" / "execution" / "state.json"
+            before = load_json(state_path)["git"]
+            product.write_text("changed\n", encoding="utf-8")
+            run(progress_command(repo, "note", "--summary", "record decision"), repo)
+            after = load_json(state_path)["git"]
+            self.assertEqual(before, after)
+            run(progress_command(repo, "resume-check"), repo, expected=3)
+
+    def test_run_evidence_reuses_post_snapshot(self):
+        with tempfile.TemporaryDirectory(prefix="olp-evidence-snapshot-count-") as temp:
+            repo = init_repo(Path(temp) / "repo")
+            run(bootstrap_command(repo), repo)
+            profile_path = repo / "docs" / "execution" / "profiles.json"
+            profile = load_json(profile_path)
+            profile["profiles"]["git-head"] = {
+                "category": "test",
+                "command": ["git", "rev-parse", "HEAD"],
+                "cwd": ".",
+                "readOnly": True,
+                "sideEffectClass": "none",
+                "timeoutSeconds": 30,
+                "requiredArtifacts": [],
+            }
+            profile_path.write_text(json.dumps(profile, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            context = progress.Context(repo, "docs/execution", "docs/project-master-plan.md")
+            args = argparse.Namespace(
+                authorization="repo_write",
+                profile="git-head",
+                timeout_seconds=None,
+                claim="HEAD resolves",
+                criterion=[],
+                gate=[],
+            )
+            with mock.patch.object(context, "snapshot", wraps=context.snapshot) as snapshot:
+                self.assertEqual(progress.command_run_evidence(context, args), 0)
+            self.assertEqual(snapshot.call_count, 2)
 
     def test_timeout_terminates_owned_process_tree(self):
         with tempfile.TemporaryDirectory(prefix="olp-timeout-") as temp:

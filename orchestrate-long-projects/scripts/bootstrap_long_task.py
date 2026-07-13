@@ -165,7 +165,7 @@ def light_plan_template(project_name: str, objective: str) -> str:
 
 1. TODO：第一个用户可见纵向切片。
 2. TODO：核心实现和错误路径。
-3. TODO：完整验证、文档和交付审计。
+3. TODO：按失败模式完成最低充分验证、文档和交付核对。
 
 ## 验收与验证
 
@@ -223,8 +223,8 @@ def protocol_template(mode: str) -> str:
 ## 开工
 
 1. 读 AGENTS.md 和 STATUS。
-2. 使用 `python -B` 运行只读 resume-check、完整 audit，并运行 `git --no-optional-locks status --short`；仅对已识别的具体 ignored 风险路径追加 `--ignored -- <path>`。
-3. 只有审计异常、未决副作用或 STATUS 指示时再读本协议全文。
+2. 使用 `python -B` 运行 fast resume-check；返回 `safe_for_code_only` 时直接继续当前代码切片。
+3. 只有 fast blocked/ambiguous、旧台账缺 fast 数据、完整性异常、unknown 动作、高风险外部动作、handoff/完成/发布/push 前，才运行完整 audit 和必要的精确 Git 核验。
 4. 当前源码、Git、测试和实际运行结果优先于线程历史。
 
 ## 单写入器
@@ -248,19 +248,27 @@ def protocol_template(mode: str) -> str:
 
 
 def agents_template(plan_rel: str, output_rel: str, mode: str) -> str:
+    if mode == "light":
+        startup = """1. 读取 `{output}/STATUS.md` 和 `{plan}` 当前切片。
+2. 运行一次 `git --no-optional-locks status --short`。
+3. 核对唯一下一动作和用户授权后继续；只有状态冲突或明确 deep/full audit 时才使用重型工具。""".format(output=output_rel, plan=plan_rel)
+    else:
+        startup = """1. 读取 `{output}/STATUS.md`。
+2. 运行只读 `python -B <skill-dir>/scripts/progress_long_task.py --repo <repo> --output-dir "{output}" --plan-path "{plan}" resume-check`。
+3. fast 返回 `safe_for_code_only` 时直接继续；只有 blocked/ambiguous、完整性异常、unknown 动作、高风险动作、handoff/完成/发布/push 前，才运行完整 audit 和精确 Git/外部状态核验。
+4. 允许继续后，只读 `{plan}` 当前阶段章节。""".format(output=output_rel, plan=plan_rel)
     return """# Agent 工作入口
 
 本仓库使用 {mode} 长任务管理。
 
 开工顺序：
 
-1. 读取 `{output}/STATUS.md`。
-2. 运行只读 `python -B <skill-dir>/scripts/progress_long_task.py --repo <repo> --output-dir "{output}" --plan-path "{plan}" resume-check`、`python -B <skill-dir>/scripts/audit_long_task.py --repo <repo> --output-dir "{output}" --plan-path "{plan}"` 和 `git --no-optional-locks status --short`；仅对具体风险路径检查 ignored 产物。
-3. 审计允许继续后，只读 `{plan}` 当前阶段章节。
-4. 当前源码、Git、测试和运行结果高于历史线程。
+{startup}
+
+当前源码、Git、测试和运行结果高于历史线程。
 
 复杂状态通过 `$orchestrate-long-projects` 和配套脚本维护。不能证明属于本轮的文件、进程、页签和产物不得清理。
-""".format(mode=mode, output=output_rel, plan=plan_rel)
+""".format(mode=mode, startup=startup)
 
 
 def ensure_unique_targets(paths: Dict[str, Path]) -> None:
@@ -356,7 +364,7 @@ def build_state(args: argparse.Namespace, snapshot: Dict[str, Any], output_rel: 
         },
         "resume": {
             "blockers": [],
-            "nextCommands": ["git --no-optional-locks status --short", "按失败模式运行最低充分测试", "更新主方案当前事实"],
+            "nextCommands": ["运行 fast resume-check；异常时升级 full audit", "按失败模式运行最低充分测试", "更新 canonical plan 当前事实"],
             "doNotDo": ["不要凭旧线程直接继续副作用", "不要删除或停止归属不明对象", "不要把代码存在写成真实业务完成"],
         },
     }
