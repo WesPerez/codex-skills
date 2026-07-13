@@ -136,6 +136,24 @@ class LongTaskToolsTest(unittest.TestCase):
             self.assertEqual(state["continuityMode"], "standard")
             self.assertEqual(state["eventTail"]["seq"], 1)
 
+    def test_skill_invocation_contract_is_explicit_and_excludes_simple_continuation(self):
+        skill_root = SCRIPT_DIR.parent
+        skill = (skill_root / "SKILL.md").read_text(encoding="utf-8")
+        metadata = (skill_root / "agents" / "openai.yaml").read_text(encoding="utf-8")
+        boundaries = (skill_root / "references" / "invocation-boundaries.md").read_text(encoding="utf-8")
+        self.assertIn("仅在用户调用 $orchestrate-long-projects", skill)
+        self.assertIn("普通会话意外中断后新开会话", skill)
+        self.assertIn("allow_implicit_invocation: false", metadata)
+        self.assertIn("上个普通会话意外中断，新会话读取旧消息后继续", boundaries)
+        self.assertIn("仓库有活动长期台账，但当前请求是无关小修复", boundaries)
+
+        with tempfile.TemporaryDirectory(prefix="olp-explicit-agents-") as temp:
+            repo = init_repo(Path(temp) / "repo")
+            run(bootstrap_command(repo), repo)
+            agents = (repo / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn("普通会话中断后的上下文续接", agents)
+            self.assertIn("无关小任务不使用", agents)
+
     def test_resume_requires_next_action_and_agents_preserve_custom_paths(self):
         with tempfile.TemporaryDirectory(prefix="olp-resume-contract-") as temp:
             base = Path(temp)

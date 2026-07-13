@@ -1,4 +1,6 @@
 interface:
   display_name: "长任务项目编排"
-  short_description: "维护跨会话项目的最小可恢复状态、交接和副作用对账"
-  default_prompt: "使用 $orchestrate-long-projects 先判断是否真的需要跨会话连续性；自包含任务立即退出本技能。已有台账时 fast-first 恢复，只有异常、高风险动作、handoff 或最终交付才升级完整审计。"
+  short_description: "显式维护长期项目台账、共享写入交接和未知副作用对账"
+  default_prompt: "使用 $orchestrate-long-projects 时先通过显式路由门和持久连续性门。普通会话中断后读取旧内容继续不使用；只有当前请求属于活动长期项目、需建立长期台账、共享写入交接或未知非幂等动作时才进入。"
+policy:
+  allow_implicit_invocation: false

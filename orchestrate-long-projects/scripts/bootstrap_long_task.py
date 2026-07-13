@@ -261,6 +261,8 @@ def agents_template(plan_rel: str, output_rel: str, mode: str) -> str:
 
 本仓库使用 {mode} 长任务管理。
 
+仅当当前请求明确属于 `{output}/STATUS.md` 指向的长期项目目标或当前切片时，才使用 `$orchestrate-long-projects`。普通会话中断后的上下文续接、只读旧计划和仓库内无关小任务不使用，也不更新本台账。
+
 开工顺序：
 
 {startup}
@@ -268,7 +270,7 @@ def agents_template(plan_rel: str, output_rel: str, mode: str) -> str:
 当前源码、Git、测试和运行结果高于历史线程。
 
 复杂状态通过 `$orchestrate-long-projects` 和配套脚本维护。不能证明属于本轮的文件、进程、页签和产物不得清理。
-""".format(mode=mode, startup=startup)
+""".format(mode=mode, output=output_rel, startup=startup)
 
 
 def ensure_unique_targets(paths: Dict[str, Path]) -> None:

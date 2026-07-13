@@ -1,22 +1,39 @@
 ---
 name: orchestrate-long-projects
-description: 维护需要跨会话连续性的复杂软件项目：在仓库已有长期任务台账，或用户明确要求跨天实施、中断恢复、checkpoint、handoff、多 Agent 写入交接、非幂等外部动作对账时，维护最小可恢复状态和证据。不要用于一次性代码审计、普通详细方案、单次实现、一般测试/CI/PR、只读状态查询或无需恢复语义的任务；这些请求只有属于一个已存在的长期项目切片时才进入本技能。
+description: 显式维护复杂软件项目的持久连续性。仅在用户调用 $orchestrate-long-projects，或适用项目规则明确指定当前请求属于活动长期项目时使用；并且必须确有长期台账、跨阶段写入交接或未知非幂等外部动作需要恢复。普通会话/任务意外中断后新会话读取旧内容继续、仅阅读摘要或旧计划、单次本地代码续作、一般测试/CI/PR 和无恢复风险的任务不要使用。
 ---
 
 # 长期项目连续性
 
-本技能只解决跨会话恢复、交接和未知副作用对账。它不替代普通代码分析、计划、实现或测试技能。
+本技能只解决需要持久状态的项目恢复、交接和未知副作用对账。普通会话上下文续接不是项目恢复；它不替代读取旧会话、handoff、代码分析、计划、实现或测试。
 
-## 硬入口
+## 双重入口
 
-先检查是否至少满足一项：
+两道门必须同时通过。
 
-- 仓库已有本技能的活动 `STATUS.md` 或 `state.json`。
-- 用户明确要求跨天/跨会话实施、中断恢复、checkpoint 或 handoff。
-- 多 Agent 会跨阶段写入并需要可靠交接。
-- 将执行非幂等外部动作，且中断后必须判断是否已经生效。
+### 1. 显式路由门
 
-全部不满足时立即退出本技能，使用普通任务流程。用户说“全面”“详细”“真实验收”本身不是长期连续性证据；自包含的一次性任务不建立台账。
+至少满足一项：
+
+- 用户调用 `$orchestrate-long-projects`。
+- 适用 `AGENTS.md` 或项目规则明确说明当前请求属于活动长期项目，并要求使用本技能。
+
+仅出现“继续上次”“上个会话中断”“读取之前的规划”“跨天了”等自然语言，不算显式路由。未通过时立即退出，正常读取旧会话、摘要、handoff、Git 和相关文件即可。
+
+### 2. 持久连续性门
+
+显式路由后还要至少满足一项：
+
+- 当前请求确实推进或恢复活动 `STATUS.md`/`state.json` 指向的长期项目切片。
+- 用户明确要求从现在开始建立可跨会话恢复的长期台账。
+- 多 Agent 或多人会跨阶段写入同一项目，需要可靠 handoff 和冲突边界。
+- 非幂等外部动作已经或即将发生，中断后必须判断是否生效，避免重复执行。
+
+未通过第二道门也退出本技能，不 bootstrap、不写 STATUS、不运行 resume-check/full audit。
+
+特别排除：普通会话意外中断后新开会话读取旧内容继续；上次只留下未提交本地代码；只重跑确定性的测试/构建；只阅读或总结旧计划；活动长期项目所在仓库中的无关小任务。这些都使用普通任务流程。
+
+边界不清时读取 [invocation-boundaries.md](references/invocation-boundaries.md)，默认不使用本技能。
 
 ## 授权边界
 
@@ -121,6 +138,7 @@ intent -> execute -> result -> postcondition evidence
 
 ## 按需引用
 
+- 不确定是否应调用本技能时读取 [invocation-boundaries.md](references/invocation-boundaries.md)。
 - 用户明确要求长期项目审计或 canonical plan 时读取 [discovery-and-master-plan.md](references/discovery-and-master-plan.md)。
 - 恢复、台账和工具契约读取 [continuity-ledger.md](references/continuity-ledger.md)。
 - handoff 或提示词模板读取 [handoff-and-prompts.md](references/handoff-and-prompts.md)。
