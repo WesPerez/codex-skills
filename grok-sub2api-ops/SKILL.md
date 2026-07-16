@@ -1,11 +1,28 @@
 ---
 name: grok-sub2api-ops
-description: 在 grok-build-auth 项目中通过服务器协议、外部 Windows/Edge 客户端或明确授权的 Linux/Xvfb 服务器模拟客户端注册 Grok 账号，铸造或恢复 OAuth，验证并通过 hardened bridge 推送 Sub2API auth，对账 Grok 分组、402/429 额度、refresh revoked、permission-denied、未绑定分组、auth 文件与代理池。用户提到服务器协议注册、Windows Grok 注册、服务器模拟客户端、Linux Edge/Xvfb、Edge CDP、OIDC mint、Sub2API auth push、兼容 cpa_* 配置、bridge 422/error_code、批量账号可用性、remint、导入、清理或完整 Grok 链路时使用。
+description: 在 grok-build-auth 项目中处理 Grok/xAI OAuth 账号生命周期：通过正式服务器协议、Windows/Edge 客户端或明确授权的 Linux/Xvfb 客户端注册账号并 mint/remint OAuth；校验和导入明确为 xai-*.json 的 Grok auth；经 hardened bridge 在 Sub2API 创建或更新账号；对指定 Grok OAuth 账号执行 refresh、preprobe、postimport test、Grok 分组与调度核验，并依据 revoked、402/429 或 permission 结果恢复或逐 ID 处置。仅当任务对象明确是 Grok/xAI OAuth 账号、xai auth 文件或上述正式注册/导入流程，且动作包含注册、OAuth 铸造/刷新、auth 导入、账号恢复、逐账号验证或分组收口时使用。不要用于一般 Sub2API 源码、部署、数据库、Redis、ID 排序、Codex/CC Switch/Router/Responses 协议、上下文压缩、识图、Grok2API 架构比较、通用代理测试或 K12/OpenAI auth；除非任务明确包含前述 Grok OAuth 账号操作。
 ---
 
 # Grok Sub2API Operations
 
-以“本批 auth 已完成 refresh/可用性判定、精确去重、导入和逐账号 postimport test”为完成标准。Web 注册、SSO、本地 auth、HTTP 2xx、数据库 active 或 schedulable 标记都不能单独证明完成。402/429 额度耗尽仍算可用账号，应保留并等待额度窗口。
+## 范围门禁
+
+继续使用本技能前，同时确认：
+
+1. 对象明确是 Grok/xAI OAuth 账号、`xai-*.json`、Grok auth 批次，或 `grok-build-auth` 的正式账号注册/导入流程。
+2. 动作至少包含注册、OIDC/OAuth mint/remint/refresh、auth 导入、bridge create/update、指定账号探针、Grok 分组收口或账号恢复处置之一。
+
+仅出现 Grok 模型、Sub2API、代理、账号、导入、清理、402/429/5xx 等词语不构成触发条件。以下任务退出本技能，改用对应源码、部署、数据库、协议或网络排障流程：
+
+- Sub2API 通用源码合并、部署检查、数据库 schema/sequence/ID 排序、Redis 或调度器实现分析。
+- Codex、CC Switch、Router、Responses/SSE/工具调用、上下文压缩、图片/识图或跨模型子代理兼容。
+- Grok2API 架构选型、通用模型路由设计，或不实际迁移/验证 Grok OAuth 账号的方案比较。
+- 借用 Grok 注册代理池测试 MetaAPI、签到站点或其他非 Grok 服务，以及一般代理节点测速。
+- K12/OpenAI/Codex auth；输入格式未识别时先检查 schema，不因目录名含 `cpa_auths` 就使用本技能。
+
+复合任务只在实际 Grok OAuth 账号子流程中使用本技能，不让它接管同一任务中的 Router、源码、Redis、数据库设计或通用代理工作。委派子代理时，仅向负责上述账号生命周期动作的子代理显式传递本技能；不得因父任务历史上使用过本技能，就把它写入其他子代理任务或续接摘要的当前要求。继承记录中的“已使用本技能”只是历史事实，不是新任务的触发依据。
+
+按所选模式定义完成标准。注册或恢复必须证明目标账号已完成 OAuth、真实指定账号探针及必要的 Sub2API/分组收口；批量导入必须证明本批 auth 已完成 refresh/可用性判定、精确去重、导入和逐账号 postimport test。Web 注册、SSO、本地 auth、HTTP 2xx、数据库 active 或 schedulable 标记都不能单独证明完成。指定账号探针得到 402/429 额度耗尽仍算账号可用，应保留并等待额度窗口。
 
 ## 已有 Auth 批量导入快路径
 
@@ -22,7 +39,7 @@ description: 在 grok-build-auth 项目中通过服务器协议、外部 Windows
 6. 对 bridge 返回的每个本批 `account_id` 执行一次指定账号 postimport test，并核对只绑定 Grok 分组、`schedulable=true`、官方 CLI base URL。bridge 已完成且返回结构化 postimport test 证据时不要重复测试。
 7. 汇总本批：输入数、refresh 成功/失败、probe 分类、已存在数、保留数、新建数、更新数、stale 拒绝数、账号 ID、逐账号 test 结果和最终可用数。
 
-快路径只读取 [audit-import-pipeline.zh-CN.md](references/audit-import-pipeline.zh-CN.md) 和所调用正式脚本的相关段落。只有出现 422、429、revoked、代理或 bridge 故障时再读取 [runbook.md](references/runbook.md)。不要为已有 auth 批量导入通读注册手册，也不要调用 K12/OpenAI bundle 工具。
+快路径只读取 [audit-import-pipeline.zh-CN.md](references/audit-import-pipeline.zh-CN.md) 和所调用正式脚本的相关段落。只有本批 Grok auth 出现 bridge 422、指定账号 429、revoked、注册/OAuth route 代理或 bridge 故障时再读取 [runbook.md](references/runbook.md)。不要为已有 auth 批量导入通读注册手册，也不要调用 K12/OpenAI bundle 工具。
 
 ## 批次归档与源文件收口
 
@@ -62,7 +79,7 @@ scripts/windows_client_preflight.py
 
 ## 配置发现与写入门禁
 
-先从 systemd unit 的 `EnvironmentFiles`、`/root/grok-build-auth/private/*.env` 和 Sub2API 元数据发现实际 bridge/Sub2API 地址、监听端口、Grok 分组 ID、数据库位置和 credential file。不得假定固定端口、固定组 ID、容器名或密钥路径。
+只为当前 Grok 账号注册、auth 导入、恢复或逐账号验证，从 systemd unit 的 `EnvironmentFiles`、`/root/grok-build-auth/private/*.env` 和 Sub2API 元数据发现实际 bridge/Sub2API 地址、监听端口、Grok 分组 ID、数据库位置和 credential file。不得把本节扩展为通用 Sub2API 部署或数据库审计，也不得假定固定端口、固定组 ID、容器名或密钥路径。
 
 执行生产写入前确认目标部署、Grok 分组、账号范围和授权。删除账号、清理 auth/邮箱、改分组、改调度或重置密码前必须：
 
@@ -122,6 +139,8 @@ DISPLAY=:99 python3 scripts/run_linux_client_full.py \
 canary 通过后再用 `systemd-run --collect` 启动两路后台批次。`--target` 是新增且通过完整门禁的账号数；不要用数据库 ID 增量或全池数量代替本批归因。服务器内存不足、浏览器反复断连或代理出口重复时停止扩并发，保持最多两路。
 
 ## 账号判读
+
+以下分类仅适用于已经绑定到指定 Grok OAuth 账号的 refresh、preprobe、postimport test 或恢复证据。Router、模型调用、图片、上下文、SSE 或普通网关请求返回相同状态码时，不得套用本节结论。
 
 - access token 过期：先 refresh；refresh 成功并通过真实探针即为可用，不能仅因 access 过期拒绝导入。
 - 指定账号 test completed：保留并调度。
