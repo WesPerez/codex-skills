@@ -39,3 +39,6 @@
 
 !/sub2api-upgrade/
 !/sub2api-upgrade/**
+
+!/sub2api-account-organizer/
+!/sub2api-account-organizer/**

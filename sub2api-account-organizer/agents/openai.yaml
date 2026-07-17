@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sub2API 账号整理"
+  short_description: "按 URL、原名标记顺序和平台排除规则整理 Sub2API 账号并支持回滚"
+  default_prompt: "使用 $sub2api-account-organizer 按有效上游 URL 和我指定的原名标记顺序整理 Sub2API 账号列表。"
