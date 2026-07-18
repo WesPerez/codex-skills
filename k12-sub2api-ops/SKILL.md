@@ -1,80 +1,64 @@
 ---
 name: k12-sub2api-ops
-description: 为 Sub2API 准备、校验、转换、记录并导入 K12 OpenAI OAuth 账号包，并按格式感知方式处理重复项。适用于用户提到 K12 账号、CPA/CliProxyAPI JSON 文件、Codex auth JSON、Sub2API 账号导入、LINUX DO K12 包、“不要刷新令牌”包、打乱/小批量 K12 导入、同邮箱不同账号包，或需要可直接在服务器运行的 K12/Sub2API 方案。
+description: 统一处理 K12/OpenAI OAuth 账号包与 Sub2API 运维：盘点和转换 CPA/Codex/ZIP/RAR/JSON bundle、按安全身份规则去重、只读探测剩余额度、生成 recommended/all 或 manifest、通过远程 Admin API 小批量导入，或在本机 Docker/Postgres 部署上备份后导入、精确绑组和验证。用户提到 K12 账号、CPA/CliProxyAPI JSON、Codex auth、Sub2API 导入、不要刷新令牌、额度还有多少、401/402、打乱/小批量导入、同邮箱不同账号或 K12 bundle 时使用。不要用于论坛搜索 space ID、浏览器 exchange 验证 workspace，或纯数据库 space 统计。
 ---
 
 # K12 Sub2API 运维
 
-## 核心规则
+## 边界
 
-把 K12 账号文件当成敏感凭据处理。不要打印 token，不要发布 bundle，不要读取浏览器 cookies/localStorage，不要批量刷新 token；除非用户已经明确授权导入路径并提供或确认管理员认证，否则不要导入到正在运行的 Sub2API 实例。
+把账号文件、token、管理员认证、数据库备份和生成 bundle 当成秘密处理。不得打印凭据，不得擅自刷新 K12 token，不得把只读额度检查升级为生成请求，也不得把 preview 伪装成已执行导入。
 
-## 必读材料
+按目标路由，避免跨风险域：
 
-任何真实的 K12/Sub2API 任务，都要先读 `references/k12_sub2api_workflow.md`，再做判断或编辑。
+- 论坛搜索或收集 K12 space/workspace ID：使用 `$linux-do-k12-space-id`，并按需调用 `$linux-do-research`。
+- 验证候选 workspace ID 是否能被当前隔离 ChatGPT session exchange：使用 `$k12check`。
+- 统计 Sub2API 数据库里的 K12 space、active/deleted/401/402：使用 `$sub2api-k12-space-audit`。
+- 账号包、额度、转换、导入、备份和精确绑组：使用本技能。
 
-分类输入文件或转换 CPA/Codex JSON 时，读取 `references/account_formats.md`。
+## 必读路由
 
-导入、编写服务器指令或调试 Sub2API API 调用时，读取 `references/sub2api_contract.md`。
+- 所有任务先读 `references/k12_sub2api_workflow.md`。
+- 识别格式、转换、命名或去重时读 `references/account_formats.md`。
+- 额度、401/402、上游可用性或清理判断时读 `references/quota_and_errors.md`。
+- 只有远程/通用 HTTP Admin API 导入时读 `references/sub2api_contract.md`。
+- 只有本机 Docker/Postgres 主机侧导入、备份、绑组、验证或恢复时读 `references/sub2api_live_ops.md`。
 
-如果任务需要读取 LINUX DO 收藏、主题、楼层、回复或附件，也使用 `$linux-do-research`；本技能处理 K12/Sub2API 决策，不负责论坛导航。
+## 固定工作流
 
-## 工作流
+1. **盘点输入。** 用 `file`、`stat`、`sha256sum` 和 `scripts/k12_bundle_tool.py inspect` 记录格式、账号数、缺失 token、plan、过期字段和重复摘要，不输出秘密。
+2. **选择转换器。** 通用单包、RAR、未知 JSON、Codex session 粘贴或现有 export 归一化使用 `k12_bundle_tool.py`；多个 CPA ZIP 且需要 manifest 使用 `build_cpa_bundle.py`；固定分组 K12 ZIP 需要 recommended/all 双 bundle 时使用 `build_k12_bundle.py`。
+3. **不伪造 K12 身份。** `plan_type=k12` 必须来自源字段、JWT claims 或另行验证的证据。缺少证据时保留未知并在导入前阻止，不得因文件名或用户说“K12 包”就写入。
+4. **只读额度。** 用户问“还有多少有额度”时直接运行 `k12_quota_probe.py <path>...` 全量扫描供应文件；不刷新 token、不写库、不调用生成接口。按 usable、耗尽、401、402、不确定分别报告。
+5. **导入前去重。** `chatgpt_account_id` 只能作为上下文，不能单独作为重复边界。优先 token hash，并检查 active 与 soft-deleted；同邮箱不同 token/account context 默认保留。
+6. **选择导入轨。** 无本机 DB/JWT_SECRET、需要跨机 HTTPS、shuffle、限量或 skip-existing 时使用 `import_sub2api_bundle.py`；位于 Sub2API 主机且需要写前备份、短时 JWT、精确绑组、expiry 同步和 SQL 验证时使用 `sub2api_live_tool.py`。两者不得混成一个隐式高权限路径。
+7. **写入闸门。** 任何真实写入前确认环境、账号范围、对象、回滚和外部副作用。远程导入必须先 preview，且脚本禁止 production/preproduction；主机侧生产写入仅在用户获知风险后仍明确强烈要求、环境与范围已核实、备份已成功时执行。
+8. **验证和报告。** 报告转换/探测/导入的精确数量、重复项口径、备份路径/hash、分组绑定、expiry、错误分类、未测试项和恢复选项。
 
-1. 在不暴露秘密的前提下盘点源文件：
-   - 列出 zip 条目和 JSON 键；
-   - 统计账号数量；
-   - 隐去 token 值；
-   - 记录源路径和大小。
-2. 分类每个来源：
-   - Sub2API bundle JSON：顶层 `accounts`；
-   - CPA 单账号 JSON：顶层 `access_token`、`email`、`id_token`、`expired`；
-   - 包含许多 CPA JSON 文件的 zip；
-   - 包含 high/mid/full/low 等分组 Sub2API bundle 的 zip。
-3. 需要时转换为 Sub2API bundle 结构。
-4. 按来源格式处理重复项：
-   - 对 CPA 单账号 zip 文件，默认保留每个 JSON 条目，因为同一邮箱可能映射到不同 `account_id`；
-   - 只有在用户明确要求，或确认同一邮箱和同一 account id/token 是重复项时才去重；
-   - 对分组 bundle zip，根据 `references/account_formats.md` 的规则谨慎去重。
-5. 校验每个生成的 bundle。转换器不得凭来源文件名或任务上下文写入 `plan_type=k12`；只有源字段或另行验证的证据能提供该值：
-   - `accounts` 存在且为列表；
-   - `platform=openai`；
-   - `type=oauth`；
-   - `credentials.plan_type=k12`；
-   - `missing_access_token=0`；
-   - 报告唯一邮箱和唯一 account-id 数量，并解释任何重复邮箱，而不是盲目删除。
-6. 优先分阶段导入：
-   - 先导入 recommended/high-confidence bundle；
-   - 测试少量账号；
-   - 首次导入成功后，再导入更新或可信度较低的包；
-   - 对易失的公开包，使用打乱的小批量。
-7. 如果用户要求替换旧账号或“只用这一批”，从 kit 中移除旧的生成 bundle 文件，更新 `run_on_server.sh`/文档，使默认使用当前批次；除非用户明确要求删除源下载，否则保留源下载。
-8. 精确记录服务器侧 Codex 可以安全执行什么。
+## 工具路由
 
-## 可复用脚本
+```bash
+# 通用离线检查、转换和比较
+python3 scripts/k12_bundle_tool.py inspect <path>
+python3 scripts/k12_bundle_tool.py convert <path> --output <bundle.json>
+python3 scripts/k12_bundle_tool.py compare <candidate.json> <existing-export.json>
 
-从技能路径运行内置脚本，或把它们复制到工作 kit 中使用。
+# 多 CPA ZIP 或固定分组 K12 ZIP
+python3 scripts/build_cpa_bundle.py --source-zip <a.zip> --out <bundle.json> --manifest <manifest.json>
+python3 scripts/build_k12_bundle.py --source-zip <grouped.zip> --recommended-group <high.json> --optional-group <low.json> --out-dir <data-dir>
 
-- `scripts/build_cpa_bundle.py`：把一个或多个 CPA 单账号 zip 文件转换为 Sub2API bundle。
-- `scripts/build_k12_bundle.py`：把分组 K12 bundle zip 条目合并为 recommended/all Sub2API bundle；如果源包分组名称不同，需要调整组名。
-- `scripts/import_sub2api_bundle.py`：通过 Sub2API admin API 预览/导入 Sub2API bundle。
+# 只读额度
+python3 scripts/k12_quota_probe.py <bundle-or-directory> [<more-paths> ...]
 
-执行 `--execute` 前始终先跑纯本地 preview 模式。需要读取现有远程账号的 authenticated reconcile 是独立阶段，只能在明确授权执行时使用 `--skip-existing --execute`，不能伪装成无副作用 preview。
+# 通用/远程 Admin API：默认仅 preview
+python3 scripts/import_sub2api_bundle.py --bundle <bundle.json>
 
-执行导入必须声明 `--environment`。生产和未证明隔离的预发布禁止由脚本直接写入；开发/测试/本地还需要 `--confirm-write`，并在操作前确认账号范围、回滚方式和导入后校验。非 loopback 地址默认必须使用 HTTPS；`--allow-insecure-remote` 只适用于用户明确授权的隔离环境。
+# 本机 Docker/Postgres：先 preflight，再在明确授权后 import
+python3 scripts/sub2api_live_tool.py preflight --bundle <bundle.json> --postgres-container <container> --pg-user <user> --pg-db <db> --environment <environment>
+```
 
-## 交付清单
+额度脚本退出 `0` 表示全部结论明确，`1` 表示报告完成但包含不确定项，`2` 表示输入或 CLI 失败；退出 `1` 时仍必须读取并报告摘要。
 
-可行时，在可直接运行的 kit 中包含这些文件：
+## 清理
 
-- `data/*.json` Sub2API bundle；
-- manifest JSON，包含来源、数量、重复项和警告；
-- `scripts/import_sub2api_bundle.py`；
-- 用于所用来源格式的重建脚本；
-- `run_on_server.sh` 或等价的服务器命令包装器；
-- `README.md`；
-- `SERVER_CODEX_PROMPT.md`。
-
-## 报告
-
-报告来源覆盖、生成文件、账号数量、缺失 token 数量、重叠/重复处理、校验命令、实际执行的导入、下载文件、配置变化、运行中进程和清理决策。
+只清理由当前任务生成、或用户明确指定替换的 bundle、manifest、备份和临时文件。源账号包、未知下载、数据库备份、用户目录和其他技能不得因名称相似而删除。

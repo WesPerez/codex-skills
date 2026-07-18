@@ -57,6 +57,7 @@ def convert_cpa_account(raw, source_zip, source_entry, index):
     expires_at = parse_timestamp(raw.get("expired"))
     last_refresh_at = parse_timestamp(raw.get("last_refresh"))
     name = account_name(email, f"cpa_{index:04d}")
+    plan_type = raw.get("plan_type") or raw.get("chatgpt_plan_type")
     credentials = {
         "access_token": raw.get("access_token") or "",
         "account_id": raw.get("account_id") or "",
@@ -67,10 +68,11 @@ def convert_cpa_account(raw, source_zip, source_entry, index):
         "expires_at": expires_at,
         "id_token": raw.get("id_token") or "",
         "organization_id": "",
-        "plan_type": raw.get("plan_type") or raw.get("chatgpt_plan_type") or "",
         "refresh_token": raw.get("refresh_token") or "",
         "session_token": "",
     }
+    if plan_type:
+        credentials["plan_type"] = plan_type
     return {
         "auto_pause_on_expired": True,
         "concurrency": 10,
@@ -86,7 +88,7 @@ def convert_cpa_account(raw, source_zip, source_entry, index):
         },
         "name": name,
         "platform": "openai",
-        "priority": 1,
+        "priority": 5,
         "rate_multiplier": 1,
         "type": "oauth",
     }

@@ -1,132 +1,147 @@
 # K12/Sub2API 完整工作流
 
-端到端处理 K12 账号包时使用此参考文档。它基于已经验证过的 LINUX DO K12 包和 Sub2API 导入流程。
+端到端处理 K12/OpenAI OAuth 账号包时使用此文档。它负责流程和工具选择；格式细节、额度语义、远程 API 和主机侧运维分别由同目录其他 reference 负责。
 
-## 操作原则
+## 目录
 
-- 为不方便操作或非技术用户优化：产出 kit 或 prompt，让另一台服务器上的 Codex 能用最少人工动作运行。
-- 如实报告覆盖情况。除非已经记录覆盖并补齐缺口，否则不要说“所有收藏”或“所有楼层”都已读取。
-- 把 OAuth 账号 JSON 当作凭据。
-- 在日志和最终输出中隐去 access token、id token、refresh token、session token、cookies 和 bearer token。
-- 不要读取浏览器 cookies、localStorage、session storage 或 profile 文件来获取凭据。
-- 未经明确授权，不要在论坛发帖、点击“refresh token”、批量刷新账号或修改远程服务。
-- 不要因为包存在就全部导入。优先分阶段导入和校验。
+- 任务类型与来源盘点
+- 转换工具与身份规则
+- Recommended、Full 和额度
+- 远程/主机侧导入
+- Kit、替换、清理和报告
 
-## 来源接收
+## 1. 先确定任务类型
 
-对每个候选文件或下载：
+- 只盘点、转换或比较账号包：纯离线，不连接 Sub2API。
+- 查询还有多少账号有额度：只调用 ChatGPT quota GET，不生成内容、不写库。
+- 远程或跨机导入：只有 Admin HTTP API，没有本机 Docker/Postgres 权限。
+- 主机侧导入：Codex 位于 Sub2API 主机，可使用 Docker/Postgres、备份和精确绑组。
+- 论坛找 workspace ID、浏览器 exchange 验证、数据库 space 统计：退出本技能，使用 SKILL.md 指定的独立技能。
 
-1. 记录绝对路径、大小、修改时间、来源 URL/topic，以及来源帖中的任何密码/说明。
-2. 使用结构化 zip 读取器检查 zip 结构。
-3. 检查 JSON 键，而不是 token 值。
-4. 统计 JSON 条目并分类来源格式。
-5. 识别来源帖中的明确警告，尤其是“不要刷新 token”或“小批量/随机导入”建议。
-6. 记录此来源与现有 bundle 在邮箱和 account id 上是否重叠。对于 CPA 单账号 zip，不要把邮箱重叠本身当成重复证明。
+## 2. 接收与盘点来源
 
-永远不要只依赖文件名。必须验证内部结构。
+对每个输入记录：
 
-## 已知来源经验
+1. 路径、容器格式、大小、修改时间和 SHA-256。
+2. README/manifest 中与 refresh、recommended、分批或密码相关的说明；不要在最终答复泄露密码。
+3. 文档类型、账号记录数、缺失 token、plan 分布、expires 格式和 platform/type。
+4. 唯一 token hash、邮箱、账号上下文和 workspace ID 数量；workspace ID 只作诊断。
+5. 是否含多个来源组、低可信组、旧批次或明显无效条目。
 
-之前验证过的包集有这些结论：
-
-- `1334个-不要去刷新令牌.zip` 是最佳初始来源。
-- 来源帖的密码/说明包括 `密1122` 和“不要刷新令牌”。
-- 1022 CPA 包与 1334 包重叠，不应在初始阶段一起导入。
-- Outlook workspace 创建不可靠/失效，但已下载的 OAuth 凭据仍可能可导入。
-- 一个较新的第二批主题 `2527525` 包含两个 100 账号 CPA zip 文件：
-  - `kxj_k12_batch_001_100_cpa.zip`
-  - `kxj_k12_batch_002_100_cpa.zip`
-- 第二批有 200 个唯一 Gmail 账号，与 1334 bundle 没有邮箱重叠，验证运行中没有缺失 access token。
-- 后来的 `batch1.zip` 示例包含重复邮箱但 account id 不同；这些条目应保留，不按邮箱去重。
-- 后来的 `50个.zip` 示例包含 50 个 CPA JSON 文件，构建 bundle 时应保留为 50 个条目。
-- 第二批回复建议不要一次导入全部。使用随机/小切片。
-
-不要假设未来工作区中存在这些精确文件。每次都重新验证。
-
-## Bundle 生成策略
-
-当来源材料足够时，至少创建两类输出：
-
-1. Recommended bundle：
-   - 只包含高可信账号；
-   - 用作第一次服务器导入；
-   - 足够小，便于测试和恢复。
-2. Full 或 optional bundle：
-   - 可信度较低、更新、重叠或批量包；
-   - 清楚标为可选；
-   - 只有在 recommended bundle 可用后才导入。
-
-对论坛公开共享且易失的 K12 账号，优先使用当前批次 bundle 和打乱的小批量导入：
+优先运行：
 
 ```bash
-export K12_BUNDLE="data/k12_sub2api_current_batch.json"
-export K12_SHUFFLE=1
-export K12_MAX_ACCOUNTS=10
-bash run_on_server.sh
+python3 scripts/k12_bundle_tool.py inspect <path>
 ```
 
-首次线上测试时，`K12_MAX_ACCOUNTS` 可以更小。
+ZIP 扩展名可能实际是 RAR；以 `file` 和实际解析结果为准，不按文件名猜测。
 
-## 重复处理规则
+## 3. 选择转换工具
 
-对 CPA 单账号 zip 文件：
+### 通用工具
 
-- 默认保留每个 JSON 条目；
-- 除非用户明确要求，否则使用 builder 的不去重模式；
-- 报告重复邮箱和唯一 account-id 数量；
-- account id 不同时保留同邮箱条目。
+使用 `k12_bundle_tool.py` 处理：
 
-对分组 bundle zip：
-
-- 构建 recommended/all bundle 时跨组谨慎去重；
-- 不要只按 `chatgpt_account_id` 或 `account_id` 去重，因为有些 K12 包让许多不同用户共享一个 workspace/account id；
-- 如果不确定，保留条目并解释重复风险，而不是静默丢弃。
-
-## 替换模式
-
-当用户说“delete previous accounts”、“only add this batch”、“只加入这一批”或等价表达时：
-
-1. 除非明确要求，不要删除原始下载。
-2. 只有在确认旧的生成 bundle JSON/manifest 文件由当前/之前的 kit 工作流产生后，才从工作 kit 的 `data/` 目录移除它们。
-3. 生成新的当前批次 bundle，推荐命名为 `data/k12_sub2api_current_batch.json`。
-4. 生成匹配的 manifest，推荐命名为 `data/k12_current_batch_manifest.json`。
-5. 更新 `run_on_server.sh` 默认 `K12_BUNDLE` 为当前批次 bundle。
-6. 更新 `README.md` 和 `SERVER_CODEX_PROMPT.md`，使服务器侧 Codex 默认只导入当前批次。
-7. 重建交付 zip，并确认其中不包含旧批次 bundle 名称。
-8. 精确报告从 kit 中删除了什么，以及保留了哪些源归档。
-
-## 校验命令
-
-使用结构化校验，不要打印 token 值：
+- 单个 JSON/TXT、JSON list、Sub2API export；
+- 单账号 CPA/Codex ZIP 或 RAR；
+- 未知包的 inspect；
+- ISO `expires_at` 归一化；
+- 从 Codex session JSONL 提取用户粘贴的 bundle；
+- candidate 与 existing export 的强标识比较。
 
 ```bash
-python scripts/import_sub2api_bundle.py \
-  --base-url http://127.0.0.1:3000 \
-  --bundle data/k12_sub2api_recommended_312.json \
-  --max-accounts 3
+python3 scripts/k12_bundle_tool.py convert <input> --output <bundle.json>
 ```
 
-对第二批或易失包：
+### 多 CPA ZIP 与 manifest
+
+多个 CPA ZIP 需要一次合并、默认保留每个条目并生成独立 manifest 时使用：
 
 ```bash
-python scripts/import_sub2api_bundle.py \
-  --base-url http://127.0.0.1:3000 \
-  --bundle data/k12_sub2api_current_batch.json \
-  --max-accounts 3 \
-  --shuffle \
-  --shuffle-seed 12345
+python3 scripts/build_cpa_bundle.py \
+  --source-zip <batch-a.zip> \
+  --source-zip <batch-b.zip> \
+  --out <bundle.json> \
+  --manifest <manifest.json>
 ```
 
-预期 preview 摘要：
+只有用户明确要求或强标识证明重复时才传 `--dedupe`。
 
-- `platforms` 包含 `openai`；
-- `plan_types` 包含 `k12`；
-- `missing_access_token` 为 `0`；
-- sample identities 只显示邮箱/name，不显示 token。
+### 固定分组 K12 ZIP
 
-## 服务器 Kit 模式
+来源是已经分组的 Sub2API bundle ZIP，且要按组生成 recommended/all 双 bundle 时使用：
 
-推荐目录结构：
+```bash
+python3 scripts/build_k12_bundle.py \
+  --source-zip <grouped.zip> \
+  --recommended-group <high.json> \
+  --recommended-group <mid.json> \
+  --optional-group <low.json> \
+  --out-dir <data-dir>
+```
+
+运行前检查脚本中的组名是否与当前归档条目一致；不一致时先调整显式组配置，禁止静默把所有组混成 recommended。
+
+## 4. 统一身份与字段规则
+
+- 不得根据文件名或任务描述伪造 `plan_type=k12`。
+- 默认新建账号 priority 为 `5`；透传现有 Sub2API bundle 时保留明确的源值。
+- 不按邮箱单独去重；同邮箱可能对应不同 token 或 account context。
+- 不按 `chatgpt_account_id` 单独去重；多个成员可共享 workspace。
+- token hash 是强标识；导入前同时检查 active 与 soft-deleted。
+- `credentials.expires_at` 存在而顶层缺失时，在通用归一化或主机导入后同步顶层字段。
+- 生成 secret JSON 时使用 `0600`，不覆盖未明确指定的文件。
+
+## 5. Recommended、Full 和小批量
+
+当来源包含不同可信度或大量公开账号时：
+
+- `recommended`：只含当前证据最强、格式完整的子集，优先首次验证。
+- `full`：包含低可信、重叠、更新或未探测条目，明确标记为可选。
+- 不因用户要求“导入全部”而静默按 quota 过滤；不因用户要求“只导可用”而跳过 probe。
+- 远程 API 轨可用固定 `--shuffle-seed` 与 `--max-accounts` 生成可复现的小批量。
+
+preview 和 execute 必须使用相同 bundle、过滤规则、shuffle seed 和 max 数量。
+
+## 6. 只读额度
+
+用户问完整剩余额度数量时，直接全量运行：
+
+```bash
+python3 scripts/k12_quota_probe.py <path> [<more-paths> ...]
+```
+
+按 `(access_token, chatgpt_account_id)` 请求上下文去重。报告 raw records、unique token、unique probe context、usable、耗尽、401、402 和不确定项。具体分类和 fallback 读取 `quota_and_errors.md`。
+
+## 7. 导入轨选择
+
+### 远程/通用 Admin API
+
+适用于没有本机数据库权限，或需要跨机 HTTPS、login/bearer/cookie、shuffle、limit、skip-existing 的 local/development/test 环境。
+
+1. 无 `--execute` 运行本地 preview。
+2. 需要 authenticated reconcile 时单独传 `--skip-existing --execute`。
+3. 写入必须提供 `--environment` 和 `--confirm-write`。
+4. 脚本禁止 production/preproduction；不要绕过。
+
+详见 `sub2api_contract.md`。
+
+### 本机 Docker/Postgres
+
+适用于 agent 在 Sub2API 主机上，且需要：
+
+- token hash 强重复检查，包括 soft-deleted；
+- 写前 `pg_dump -Fc`、SHA-256 和 `0600`；
+- 内存短时 admin JWT；
+- Idempotency-Key；
+- 只对本次导入 ID 精确绑组；
+- expiry 同步和 SQL 计数验证。
+
+先运行带显式 `--environment` 的 `preflight`。真实 `import` 需要 `--confirm-write`；production/preproduction 还需要在用户明确强烈授权后传 `--confirm-production-write`。详见 `sub2api_live_ops.md`。
+
+## 8. Kit 交付
+
+需要交给另一台服务器或另一个 Codex 时，可生成独立 kit：
 
 ```text
 k12-sub2api-kit/
@@ -134,59 +149,22 @@ k12-sub2api-kit/
   SERVER_CODEX_PROMPT.md
   run_on_server.sh
   data/
-    k12_sub2api_recommended_*.json
-    k12_sub2api_all_*.json
-    k12_sub2api_current_batch.json
+    *.json
     *_manifest.json
   scripts/
-    build_k12_bundle.py
-    build_cpa_bundle.py
     import_sub2api_bundle.py
-  docs/
-    cpa_tutorial_summary.md
 ```
 
-`README.md` 应解释给人看的使用方式。
+kit 的默认命令必须先 preview；所有 secret bundle 使用 `0600`；README 和 prompt 不包含 token、管理员密码或长期 bearer。
 
-`SERVER_CODEX_PROMPT.md` 应告诉服务器侧 Codex 按顺序准确执行什么，并在报告中隐去秘密。
+## 9. 替换与清理
 
-`run_on_server.sh` 应：
+用户说“只用这一批”时，先区分：
 
-- 使用 `SUB2API_BASE_URL`，谨慎默认为 localhost；
-- 使用 `K12_BUNDLE` 并设置安全默认值；
-- 支持 `K12_MAX_ACCOUNTS`；
-- 支持 `K12_SHUFFLE` 和固定 `K12_SHUFFLE_SEED`，使 preview 和 execute 选择同一批账号；
-- 先运行 preview，再执行。
+- 替换 kit 中的生成 bundle：可在证明归属后更新或删除旧生成物。
+- 删除 Sub2API 中旧账号：这是独立的 live 变更，必须备份并明确账号范围，不能从“只用这一批”自动推导。
+- 原始下载、未知归档和数据库备份默认保留。
 
-## CPA 教程关系
+## 10. 最终报告
 
-LINUX DO CPA 教程讲的是本地 CliProxyAPI 使用方式：
-
-1. 下载 CPA/CliProxyAPI；
-2. 把 `config.example.yaml` 复制为 `config.yaml`；
-3. 设置 `secret-key`；
-4. 运行 CPA；
-5. 登录 `http://localhost:8317/management.html#/login`；
-6. 上传 `.json` 账号文件；
-7. 创建 API key；
-8. 把 Cherry Studio/Codex/OpenAI-compatible clients 指向 `http://localhost:8317`。
-
-对 Sub2API 部署而言，CPA 是背景知识。如果目标是 Sub2API 导入，就把 JSON 文件转换成 Sub2API bundle 并直接导入。除非用户特别要求 CPA，否则不要部署 CPA。
-
-## 最终答复要求
-
-对 K12/Sub2API 工作，始终报告：
-
-- 读取了哪些来源，以及是否还有未读收藏/楼层；
-- 下载文件及其路径；
-- 生成/修改的文件；
-- 生成的账号数量；
-- 重复/重叠数量；
-- 缺失 token 数量；
-- 是否刷新 token：通常为 `no`；
-- 是否执行 live import：通常为 `no`，除非已明确授权；
-- 用于校验的命令；
-- 如果使用浏览器，报告打开/关闭的标签页；
-- 已执行或有意未执行的清理；
-- 运行中的进程/服务；
-- 如果创建了 commit，报告 commit hash。
+至少报告：输入与来源覆盖、转换工具、生成文件、账号数、缺失 token、重复口径、quota 分类、是否 refresh、是否 live import、目标环境、备份路径/hash、分组与 expiry 验证、未测试项、清理和恢复选项。

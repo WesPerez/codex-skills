@@ -1,156 +1,126 @@
-# K12 账号格式
+# K12 账号格式与转换
 
-检查、转换或校验 K12 账号包时使用此参考文档。永远不要打印原始 token 值。
+识别未知 K12/OpenAI OAuth 包、转换为 Sub2API bundle、命名或去重时使用。不得打印原始 token、session、管理员认证或完整 Authorization header。
 
-## Sub2API Bundle JSON 格式
+## 目录
 
-结构：
+- 归档检查
+- 支持的布局
+- 命名
+- 去重
+- 导入候选策略
+
+## 归档检查
+
+- 用 `file`、`stat`、`sha256sum` 确认真实容器和来源证据。
+- ZIP 先用 `unzip -l/-t`；扩展名为 ZIP 的文件也可能实际是 RAR5，必要时使用 `unrar` 或 `7z`。
+- 先读 README、manifest 和 metadata，尤其关注 refresh、recommended、分组和密码说明；最终答复不要泄露密码。
+- 只读取结构和键，禁止为了检查格式输出 token 值。
+
+## 支持的布局
+
+### Sub2API bundle
+
+顶层具有 `accounts` 列表，并带有 `type: sub2api-data`、`proxies` 或 `version` 等 Sub2API 特征时识别为 bundle：
 
 ```json
 {
-  "exported_at": "2026-07-05T00:00:00+00:00",
+  "type": "sub2api-data",
+  "version": 1,
+  "exported_at": "2026-01-01T00:00:00Z",
   "proxies": [],
-  "accounts": [
-    {
-      "platform": "openai",
-      "type": "oauth",
-      "name": "account-name",
-      "credentials": {
-        "access_token": "...",
-        "email": "user@example.com",
-        "id_token": "...",
-        "refresh_token": "",
-        "plan_type": "k12",
-        "chatgpt_account_id": "...",
-        "account_id": "...",
-        "expires_at": 1783946504
-      }
-    }
-  ]
+  "accounts": []
 }
 ```
 
-此工作流的最低要求：
+- 目标 API 需要 numeric timestamp 时，把顶层和 `credentials.expires_at` 的 ISO 时间统一为 Unix 秒。
+- `credentials.expires_at` 存在、顶层缺失时，把规范化后的值同步到顶层；调度和 auto-pause 可能依赖顶层字段。
+- 用户把 bundle 粘贴在对话中时，用 `k12_bundle_tool.py extract-pasted-session` 从 Codex session JSONL 提取第一个完整 JSON，对尾随指令文本不做拼接；输出使用 `0600`。
 
-- 顶层 `accounts` 是列表；
-- 每个账号使用 `platform=openai`；
-- 每个账号使用 `type=oauth`；
-- 每个账号都有 `credentials.access_token`；
-- 每个账号都有 `credentials.plan_type=k12`；
-- 每个账号都有身份字段，例如 `credentials.email` 或 `name`。
+### Kit ZIP 中的 bundle
 
-有用的可选字段：
+常见 kit 在 `data/` 下提供按角色命名的文件，例如：
 
-- `auto_pause_on_expired: true`
-- `concurrency: 10`
-- `priority: 1`
-- `rate_multiplier: 1`
-- `extra.source`
-- `extra.email`
-- `credentials.id_token`
-- 如果源中存在，则包含 `credentials.refresh_token`
-- `credentials.client_id`
-- `credentials.expires_at`
+- `k12_sub2api_recommended.json`
+- `k12_sub2api_all.json`
+- `k12_sub2api_current_batch.json`
 
-## CPA 单账号 JSON
+优先服从 README/manifest 的分组定义。不要因为某个 all/full 包更大就默认导入，也不要相信文件名中的账号数量，必须实际统计。
 
-论坛 CPA zip 包中常见结构：
+### CPA/Codex 单账号 JSON
+
+常见结构：
 
 ```json
 {
+  "type": "codex",
+  "email": "user@example.com",
   "access_token": "...",
   "account_id": "...",
-  "email": "user@gmail.com",
-  "expired": "2026-07-15T04:07:22+00:00",
-  "id_token": "...",
-  "last_refresh": "2026-07-05T04:07:22+00:00",
-  "refresh_token": "",
-  "type": "codex"
+  "chatgpt_account_id": "...",
+  "plan_type": "k12",
+  "session_token": "..."
 }
 ```
 
-把一个文件转换为一个 Sub2API 账号：
+转换规则：
 
-- `platform`：`openai`
-- `type`：`oauth`
-- `name`：清理后的邮箱本地部分
-- `credentials.access_token`：源 `access_token`
-- `credentials.email`：源 `email`
-- `credentials.id_token`：源 `id_token`
-- `credentials.refresh_token`：源 `refresh_token`，不存在时为空字符串
-- `credentials.chatgpt_account_id`：源 `account_id`
-- `credentials.account_id`：源 `account_id`
-- `credentials.expires_at`：从 `expired` 解析出的 Unix timestamp
-- `credentials.plan_type`：只复制源中的 `plan_type` / `chatgpt_plan_type`；源缺失时保持为空并阻止执行导入，不能仅因包名或论坛描述推断为 `k12`
-- `extra.source`：源 zip basename
-- `extra.source_entry`：原始 zip 条目路径
-- `extra.source_type`：源 `type`
-- `extra.last_refresh_at`：从 `last_refresh` 解析出的 timestamp
+- `platform=openai`、`type=oauth`。
+- `credentials.access_token` 来自源 `access_token`，缺失时阻止转换为可导入账号。
+- 按源字段映射 `session_token`、email、account ID、workspace ID 和 user ID；JWT claims 可作为补充证据。
+- `plan_type` 只能来自源字段、`chatgpt_plan_type` 或 JWT claims；没有证据时保持未知，禁止默认写成 `k12`。
+- expiry 优先使用明确源字段，其次 JWT `exp`；有值时同时写 credentials 和顶层。
+- 默认 `auto_pause_on_expired=true`、`concurrency=10`、`priority=5`、`rate_multiplier=1`。
+- `extra` 记录来源文件和 token SHA-256，不保存额外明文秘密。
 
-不要假设 `refresh_token` 存在。许多共享 CPA 文件只有 access/id token。
+保留上游实际提供的 ID；不要制造不存在的 account/user/workspace ID。
 
-对 CPA 单账号 zip 文件，默认保留每个 JSON 条目。不要仅因为邮箱重复就移除条目。重复邮箱可能合法地拥有不同 `account_id` / `chatgpt_account_id`，除非用户要求去重，或按 account id 和 token 证明条目完全相同，否则应作为独立账号导入。
+### 多 CPA/Codex JSON 的 ZIP/RAR
 
-## 分组 K12 Bundle Zip
+- 每个 JSON 条目视为候选账号；同邮箱不代表重复。
+- 同一 K12 workspace 下大量账号共享 `chatgpt_account_id` 是正常现象，不能据此合并。
+- 某些源没有 expiry，不要编造；保留 `auto_pause_on_expired`。
+- 用户要求“全部账号”时，转换所有结构完整条目，除非强重复或必需字段缺失；不要未经要求按上游 probe 过滤。
+- 多个 CPA ZIP 且需要 manifest 时使用 `build_cpa_bundle.py`；单包通用转换使用 `k12_bundle_tool.py`。
 
-有些 zip 文件包含多个 Sub2API 风格的 bundle JSON 文件，例如：
+### 分组 Sub2API ZIP
 
-- `k12_5h_high_36.json`
-- `k12_5h_mid_73.json`
-- `k12_5h_full_203.json`
-- `k12_5h_low_1022.json`
+当 ZIP 内已经是多个 Sub2API bundle 组，并需要 recommended/all 输出时使用 `build_k12_bundle.py`。必须显式传入 recommended 和 optional 条目名，不从 high/low 等文件名自动推断可信度。
 
-处理方式：读取命名 JSON 条目，并谨慎合并它们的 `accounts` 列表。需要谨慎去重，因为这些分组 bundle 经常有意让许多邮箱重复使用同一 workspace id。
+### 单对象、列表和 JSONL
 
-典型策略：
+通用工具接受单个 Sub2API/CPA 对象、对象列表和支持的 bundle。额度工具额外接受 bare token 单对象和 JSONL；转换工具仍要求能够识别账号结构。
 
-- recommended bundle：high + mid + full 组；
-- all bundle：high + mid + full + low 组；
-- manifest：记录每组输入数量、添加数量和跳过的重复项。
+## 命名
 
-## 身份与去重
+按顺序选择稳定、可搜索的名称：
 
-只有当去重明确属于任务时，才使用此身份函数：
+1. 完整 email，小写。
+2. 源 `name`。
+3. account/workspace ID。
+4. token hash 前缀。
 
-1. 使用精确的 email、精确 account id 和完整 access token 组成复合身份；字段缺失时保留空位，不将同邮箱不同 account/token 合并；
-2. 比较疑似完全重复文件时使用完整 token 的内存比较，日志和 manifest 中绝不输出 token；
-3. 分组 bundle 也不得只按 email 去重；没有完整重复证据时保留条目；
-4. 没有更好身份字段时，使用顶层 `name`。
+文件名存在 `wsNN` 后缀且同邮箱重复时可保留为 `email__wsNN`。仍重名时使用 account ID 前缀、token hash 前缀或稳定序号。不要为了 name 唯一而修改 `credentials.email`。
 
-原因：这里有两种相反的失败模式。有些 K12 dump 让许多不同用户共享同一个 ChatGPT workspace/account id，所以只看 account id 会合并掉有效账号。另一些 CPA zip 可以包含同一邮箱但不同 account id，所以只看邮箱也会合并掉有效账号。去重必须感知格式，并基于证据。
+## 去重
 
-## 安全检查秘密
+强标识：
 
-使用数量和键名，而不是输出 token：
+- access token SHA-256；
+- 同一来源中的完整 token；
+- 经过验证的完全相同账号上下文。
 
-- zip 条目名；
-- 顶层 JSON 键；
-- credential 键；
-- `HasAccessToken=true/false`；
-- `HasRefreshToken=true/false`；
-- 只有在可接受时才给邮箱/name 样例；
-- 只有在需要时才给 token 字符串长度。
+弱标识，仅用于诊断：
 
-隐去匹配这些名称的键：
+- email/name；
+- `chatgpt_account_id` 或 `account_id`；
+- plan、状态和来源组。
 
-- `access_token`
-- `refresh_token`
-- `id_token`
-- `session_token`
-- `authorization`
-- `cookie`
-- `bearer`
+导入前同时检查 active 与 soft-deleted。soft-deleted 的 token hash 命中仍是强重复。用户明确要求重新导入时要说明风险，通过 Admin API 处理，不直接改库伪造新账号。
 
-## 校验清单
+## 导入候选策略
 
-对每个生成的 bundle：
-
-- 账号数量与 manifest 一致；
-- 除非明确请求去重，否则账号数量与源条目数量一致；
-- 重复邮箱以 account-id 数量报告，而不是自动删除；
-- `missing_access_token = 0`；
-- 所有 `platform` 值都是 `openai`；
-- 所有 `type` 值都是 `oauth`；
-- 所有 plan type 都是 `k12`；
-- bundle 没有意外包含 cookies 或浏览器会话存储；
-- 没有把原始 token 打印到日志或文档。
+- “只导当前可用”：包含 quota/上游 probe 明确成功的账号，说明精确 inclusion rule。
+- `usage_limit_reached` 或当前额度耗尽：凭据可能仍有效，但此刻不可用；只有用户要求包含 limited 账号时导入。
+- revoked、invalidated、deactivated：可用性导入默认排除；审计保留需用户明确要求。
+- 未运行 probe：只能报告格式已校验，不能声称账号可用。

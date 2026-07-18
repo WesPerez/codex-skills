@@ -1,5 +1,13 @@
 # Sub2API 导入契约
 
+## 目录
+
+- 已知 API 契约与认证
+- Preview 与执行导入
+- 跳过现有账号
+- Base URL 发现与导入后验证
+- 失败处理与安全边界
+
 导入 K12 bundle 到 Sub2API 或编写服务器侧指令时使用此参考文档。
 
 ## 已知 API 契约
@@ -65,7 +73,7 @@ Preview 不发送任何网络请求，只做本地 bundle 检查。它应该：
 ```bash
 python3 scripts/import_sub2api_bundle.py \
   --base-url "$SUB2API_BASE_URL" \
-  --bundle data/k12_sub2api_recommended_312.json \
+  --bundle data/k12_sub2api_recommended.json \
   --max-accounts 3
 ```
 
@@ -78,7 +86,7 @@ python3 scripts/import_sub2api_bundle.py \
 ```bash
 python3 scripts/import_sub2api_bundle.py \
   --base-url "$SUB2API_BASE_URL" \
-  --bundle data/k12_sub2api_recommended_312.json \
+  --bundle data/k12_sub2api_recommended.json \
   --skip-existing \
   --environment test \
   --confirm-write \
@@ -95,6 +103,8 @@ python3 scripts/import_sub2api_bundle.py \
   --shuffle \
   --shuffle-seed "$K12_SHUFFLE_SEED" \
   --max-accounts 10 \
+  --environment test \
+  --confirm-write \
   --execute
 ```
 

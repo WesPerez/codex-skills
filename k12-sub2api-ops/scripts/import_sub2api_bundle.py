@@ -227,7 +227,7 @@ def parse_headers(items):
 def main():
     parser = argparse.ArgumentParser(description="Import a K12 sub2api bundle into a Sub2API server.")
     parser.add_argument("--base-url", default=os.getenv("SUB2API_BASE_URL", "http://127.0.0.1:3000"))
-    parser.add_argument("--bundle", default="data/k12_sub2api_recommended_312.json")
+    parser.add_argument("--bundle", default="data/k12_sub2api_recommended.json")
     parser.add_argument("--execute", action="store_true", help="Actually POST the bundle. Without this, only preview.")
     parser.add_argument("--skip-existing", action="store_true", help="Fetch existing accounts and skip duplicates before import.")
     parser.add_argument("--skip-default-group-bind", action="store_true")
