@@ -7,9 +7,10 @@ readonly DEPLOY_DIR="/root/sub2api-prod-deploy"
 readonly COMPOSE_FILE="$DEPLOY_DIR/docker-compose.yml"
 readonly ENV_FILE="$DEPLOY_DIR/.env"
 readonly RUN_ROOT="/root/backups/sub2api/upgrade-runs"
+readonly APPLY_LOCK_FILE="/run/lock/sub2api-upgrade.lock"
 readonly APP_IMAGE="ghcr.io/wesperez/sub2api:mine"
 readonly APP_HEALTH_URL="http://127.0.0.1:13080/health"
-readonly ROUTER_READY_URL="http://127.0.0.1:13081/ready"
+readonly ROUTER_UPSTREAM_CONFIG="/etc/nginx/conf.d/codex-unified-router-upstream.conf"
 readonly PUBLIC_HOST="wooai.cc.cd"
 readonly HEALTH_TIMEOUT_SECONDS=180
 
@@ -25,6 +26,9 @@ CURRENT_REVISION=""
 CANDIDATE_IMAGE_ID=""
 CANDIDATE_REVISION=""
 PRESERVE_ARTIFACTS=0
+ROLLOUT_STARTED=0
+ROLLOUT_COMPLETE=0
+FAILURE_HANDLED=0
 
 usage() {
   cat <<'USAGE'
@@ -108,13 +112,46 @@ discard_unrolled_run() {
 
 on_exit() {
   local status="$1"
+  trap - EXIT
+  trap '' INT TERM
+  if (( status != 0 && ROLLOUT_STARTED == 1 && ROLLOUT_COMPLETE == 0 && FAILURE_HANDLED == 0 )); then
+    warn "rollout exited unexpectedly; attempting the proven application-only rollback"
+    if [[ -n "$RUN_DIR" && -f "$RUN_DIR/manifest.env" ]]; then
+      printf 'status=unexpected_exit\n' >> "$RUN_DIR/manifest.env" || true
+    fi
+    if (( ROLLBACK_IMAGE_SAFE == 1 )) && rollback_application; then
+      if [[ -n "$RUN_DIR" && -f "$RUN_DIR/manifest.env" ]]; then
+        printf 'status=rolled_back_after_unexpected_exit\nrolled_back_at=%s\n' \
+          "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$RUN_DIR/manifest.env" || true
+      fi
+      warn "unexpected-exit application rollback succeeded; preserve $RUN_DIR for investigation"
+    else
+      if [[ -n "$RUN_DIR" && -f "$RUN_DIR/manifest.env" ]]; then
+        printf 'status=rollback_failed_after_unexpected_exit\n' >> "$RUN_DIR/manifest.env" || true
+      fi
+      warn "unexpected-exit application rollback failed; preserve $RUN_DIR and investigate immediately"
+    fi
+    return
+  fi
   if (( status != 0 && PRESERVE_ARTIFACTS == 0 )); then
     release_rollback_tag || warn "could not remove pre-rollout rollback tag: $ROLLBACK_TAG"
     discard_unrolled_run || warn "could not remove incomplete pre-rollout run: $RUN_DIR"
   fi
 }
 
+on_signal() {
+  local signal="$1"
+  warn "received $signal; leaving through the guarded exit path"
+  case "$signal" in
+    INT) exit 130 ;;
+    TERM) exit 143 ;;
+    *) exit 1 ;;
+  esac
+}
+
 trap 'on_exit $?' EXIT
+trap 'on_signal INT' INT
+trap 'on_signal TERM' TERM
 
 check_status_json() {
   local url="$1"
@@ -131,10 +168,25 @@ check_public_ready() {
   jq -e 'type == "object" and .status == "ready"' >/dev/null <<<"$body"
 }
 
+resolve_router_ready_url() {
+  [[ -f "$ROUTER_UPSTREAM_CONFIG" ]] || return 1
+  local -a ports=()
+  mapfile -t ports < <(
+    sed -nE '/^[[:space:]]*server[[:space:]]+127\.0\.0\.1:(13082|13083)([[:space:]][^;]*)?;([[:space:]]*#.*)?$/ {
+      /[[:space:]](backup|down)([[:space:]]|;)/d
+      s/^[[:space:]]*server[[:space:]]+127\.0\.0\.1:(13082|13083).*/\1/p
+    }' "$ROUTER_UPSTREAM_CONFIG"
+  )
+  [[ "${#ports[@]}" == "1" ]] || return 1
+  printf 'http://127.0.0.1:%s/ready\n' "${ports[0]}"
+}
+
 check_http_baseline() {
   info "checking application, Router, and Nginx readiness"
+  local router_ready_url
+  router_ready_url="$(resolve_router_ready_url)" || die "could not resolve the active Router slot from Nginx"
   check_status_json "$APP_HEALTH_URL" "ok" || die "application health endpoint is not healthy"
-  check_status_json "$ROUTER_READY_URL" "ready" || die "Router ready endpoint is not ready"
+  check_status_json "$router_ready_url" "ready" || die "active Router ready endpoint is not ready"
   check_public_ready || die "Nginx/SNI public ready endpoint is not ready"
 }
 
@@ -166,6 +218,12 @@ check_watchtower_guard() {
   if [[ "$command_line" != *"--disable-containers sub2api-prod"* && "$command_line" != *"--disable-containers=sub2api-prod"* ]]; then
     die "watchtower does not prove sub2api-prod is disabled; refuse a rollout race"
   fi
+}
+
+acquire_apply_lock() {
+  require_command flock
+  exec 9>"$APPLY_LOCK_FILE"
+  flock -n 9 || die "another Sub2API production rollout is already running"
 }
 
 collect_running_state() {
@@ -288,33 +346,41 @@ verify_candidate_runtime() {
   local running_container
   local running_image
   local running_revision
-  running_container="$(compose ps -q sub2api)"
+  local router_ready_url
+  running_container="$(compose ps -q sub2api)" || return 1
   [[ -n "$running_container" ]] || return 1
-  running_image="$(docker inspect -f '{{.Image}}' "$running_container")"
+  running_image="$(docker inspect -f '{{.Image}}' "$running_container")" || return 1
   [[ "$running_image" == "$CANDIDATE_IMAGE_ID" ]] || return 1
-  running_revision="$(image_label "$running_image" "org.opencontainers.image.revision")"
+  running_revision="$(image_label "$running_image" "org.opencontainers.image.revision")" || return 1
   [[ "$running_revision" == "$CANDIDATE_REVISION" ]] || return 1
+  router_ready_url="$(resolve_router_ready_url)" || return 1
   check_status_json "$APP_HEALTH_URL" "ok" || return 1
-  check_status_json "$ROUTER_READY_URL" "ready" || return 1
+  check_status_json "$router_ready_url" "ready" || return 1
   check_public_ready || return 1
 }
 
 rollback_application() {
   info "candidate verification failed; restoring the proven rollback image"
-  compose_with_image "$ROLLBACK_TAG" up -d --no-deps --force-recreate sub2api
+  docker image tag "$CURRENT_IMAGE_ID" "$APP_IMAGE" || return 1
+  [[ "$(docker image inspect -f '{{.Id}}' "$APP_IMAGE")" == "$CURRENT_IMAGE_ID" ]] || return 1
+  compose_with_image "$ROLLBACK_TAG" up -d --no-deps --force-recreate sub2api || return 1
   wait_for_application_health || return 1
   local running_container
   local running_image
-  running_container="$(compose ps -q sub2api)"
+  local router_ready_url
+  running_container="$(compose ps -q sub2api)" || return 1
   [[ -n "$running_container" ]] || return 1
-  running_image="$(docker inspect -f '{{.Image}}' "$running_container")"
+  running_image="$(docker inspect -f '{{.Image}}' "$running_container")" || return 1
   [[ "$running_image" == "$CURRENT_IMAGE_ID" ]] || return 1
+  router_ready_url="$(resolve_router_ready_url)" || return 1
   check_status_json "$APP_HEALTH_URL" "ok" || return 1
-  check_status_json "$ROUTER_READY_URL" "ready" || return 1
+  check_status_json "$router_ready_url" "ready" || return 1
   check_public_ready || return 1
 }
 
 handle_candidate_failure() {
+  FAILURE_HANDLED=1
+  trap '' INT TERM
   record status "candidate_failed"
   if (( ROLLBACK_IMAGE_SAFE == 0 )); then
     record status "rollback_withheld"
@@ -323,6 +389,7 @@ handle_candidate_failure() {
   if rollback_application; then
     record status "rolled_back"
     record rolled_back_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    record local_app_tag_image_id "$CURRENT_IMAGE_ID"
     info "application rollback succeeded; preserve $RUN_DIR for investigation"
     exit 2
   fi
@@ -383,6 +450,9 @@ parse_args() {
 
 main() {
   parse_args "$@"
+  if [[ "$MODE" == "apply" ]]; then
+    acquire_apply_lock
+  fi
   run_preflight
   [[ "$MODE" == "apply" ]] || exit 0
 
@@ -393,6 +463,7 @@ main() {
   record_background_writer_state
   assert_unchanged_before_rollout
   PRESERVE_ARTIFACTS=1
+  ROLLOUT_STARTED=1
 
   info "replacing only the sub2api application container"
   if ! compose up -d --no-deps --force-recreate sub2api; then
@@ -402,6 +473,7 @@ main() {
     handle_candidate_failure
   fi
 
+  ROLLOUT_COMPLETE=1
   record status "passed_pending_finalization"
   record passed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   info "rollout succeeded"

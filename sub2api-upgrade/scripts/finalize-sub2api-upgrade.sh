@@ -5,7 +5,7 @@ umask 077
 
 readonly RUN_ROOT="/root/backups/sub2api/upgrade-runs"
 readonly APP_HEALTH_URL="http://127.0.0.1:13080/health"
-readonly ROUTER_READY_URL="http://127.0.0.1:13081/ready"
+readonly ROUTER_UPSTREAM_CONFIG="/etc/nginx/conf.d/codex-unified-router-upstream.conf"
 readonly PUBLIC_HOST="wooai.cc.cd"
 readonly DEFAULT_MIN_AGE_MINUTES=1440
 readonly DEFAULT_PRUNE_MIN_AGE_HOURS=168
@@ -70,12 +70,22 @@ check_public_ready() {
   jq -e 'type == "object" and .status == "ready"' >/dev/null <<<"$body"
 }
 
+resolve_router_ready_url() {
+  [[ -f "$ROUTER_UPSTREAM_CONFIG" ]] || return 1
+  local -a ports=()
+  mapfile -t ports < <(sed -nE 's/^[[:space:]]*server[[:space:]]+127\.0\.0\.1:(13082|13083);.*$/\1/p' "$ROUTER_UPSTREAM_CONFIG")
+  [[ "${#ports[@]}" == "1" ]] || return 1
+  printf 'http://127.0.0.1:%s/ready\n' "${ports[0]}"
+}
+
 check_baseline() {
   command -v docker >/dev/null 2>&1 || die "docker is unavailable"
   command -v curl >/dev/null 2>&1 || die "curl is unavailable"
   command -v jq >/dev/null 2>&1 || die "jq is unavailable"
+  local router_ready_url
+  router_ready_url="$(resolve_router_ready_url)" || die "could not resolve the active Router slot from Nginx"
   check_status_json "$APP_HEALTH_URL" "ok" || die "application health endpoint is not healthy"
-  check_status_json "$ROUTER_READY_URL" "ready" || die "Router ready endpoint is not ready"
+  check_status_json "$router_ready_url" "ready" || die "active Router ready endpoint is not ready"
   check_public_ready || die "Nginx/SNI public ready endpoint is not ready"
 }
 
