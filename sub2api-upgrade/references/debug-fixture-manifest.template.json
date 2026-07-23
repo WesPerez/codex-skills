@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "synthetic_only": true,
+  "oauth_refresh_owner": "debug-only",
+  "fixture_version": "debug-fixture-v1",
+  "last_verified_schema": "candidate-schema-placeholder",
+  "notes": "Synthetic-only template. Replace stable_label values with debug-local labels. Never put real IDs, tokens, passwords, or production account identifiers here.",
+  "config_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "objects": [
+    {
+      "kind": "user",
+      "stable_label": "debug-user-primary",
+      "field_set": [
+        "id",
+        "email_label",
+        "role",
+        "status"
+      ],
+      "field_set_hash": "2594df0797e3b2cedb7f99f3d37ecff9a0de89f7ff60bfbf836c8768bc81bbe5"
+    },
+    {
+      "kind": "api_key",
+      "stable_label": "debug-key-primary",
+      "field_set": [
+        "id",
+        "name",
+        "user_label",
+        "status",
+        "prefix_label"
+      ],
+      "field_set_hash": "1d15b824b98b2c9dff4b6893f504ed320676386a0fc99cec08cf220d4a8fe201"
+    },
+    {
+      "kind": "account",
+      "stable_label": "debug-account-openai",
+      "field_set": [
+        "id",
+        "platform",
+        "name",
+        "group_label",
+        "status"
+      ],
+      "field_set_hash": "b276d0c8ef17f8a5b3e8b674e3ffab7fad2afabe59df98cac1c51461990ff847"
+    },
+    {
+      "kind": "group",
+      "stable_label": "debug-group-default",
+      "field_set": [
+        "id",
+        "name",
+        "status"
+      ],
+      "field_set_hash": "c669a69da914d37c3f6437546a2f44d088f5775aa1ebd48cf24f77ca2a342209"
+    }
+  ],
+  "maps": {
+    "header_overrides": {
+      "field_set": [
+        "User-Agent",
+        "Originator"
+      ],
+      "field_set_hash": "e10c4c93219ea092256f93b962fbfafef29c466a80133a294bfc2ee2440c547a"
+    },
+    "proxy": {
+      "field_set": [
+        "enabled",
+        "scheme",
+        "host_label",
+        "port"
+      ],
+      "field_set_hash": "a1c14761ddc73618a9b1dbfcfbe120c26ec873e4c48d6e18c86feedbc9b81e85"
+    },
+    "model_mapping": {
+      "field_set": [
+        "source_model",
+        "target_model",
+        "effort"
+      ],
+      "field_set_hash": "af59009895875129084571f13d0d5315b8faf252d48d52e07bcb1e133cad217f"
+    }
+  },
+  "balances": [
+    {
+      "stable_label": "debug-user-primary",
+      "min": 1,
+      "max": 1000000
+    }
+  ]
+}

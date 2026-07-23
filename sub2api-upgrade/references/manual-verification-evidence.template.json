@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "manual-verification",
+  "case_id": "R0-6",
+  "revision": "0000000000000000000000000000000000000000",
+  "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "attempt": 1,
+  "adapter_id": "manual",
+  "target": {
+    "environment": "debug",
+    "compose_project": "sub2api-debug",
+    "deploy_dir": "/root/sub2api-debug-deploy"
+  },
+  "verifier": "operator-id-or-name",
+  "procedure": "Describe the exact manual checks performed against the bound debug candidate.",
+  "assertions": [
+    {
+      "name": "manual_check_name",
+      "passed": true
+    }
+  ],
+  "verified_at": "1970-01-01T00:00:00Z"
+}

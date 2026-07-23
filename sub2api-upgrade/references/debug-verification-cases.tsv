@@ -1,0 +1,45 @@
+id	suite	level	executor	description	assertion
+R0-1	core	R0	metadata	候选与运行镜像身份	CI run、固定 tag、revision、ref.name、digest 与最终 SHA 一致
+R0-2	core	R0	debug	候选启动与运行绑定	容器使用精确候选镜像，健康且 loopback /health 正常
+R0-3	core	R0	debug	鉴权与只读基础数据	登录/API key、账号、分组和设置读取符合 fixture
+R0-4	core	R0	canary	OpenAI Responses 基线	流式与非流式结构、usage 和终态完整
+R0-5	core	R0	canary	Chat/Responses 错误基线	预期 4xx/5xx 分类正确且不产生未解释 failover
+R0-6	core	R0	manual	职责双向回归与关联日志审查	每个职责及上游核心路径通过，预期负例已关联且无未解释 4xx/5xx 或终态异常
+R0-7	core	R0	logs	致命日志模式门禁	完整时间窗内无 panic、fatal、迁移/checksum、OOM 或 response.failed 致命模式
+R0-8	core	R0	debug	旧应用回退兼容	旧镜像在候选 schema 上健康且核心只读路径可用
+R1-A1	long_context	R1	ci+canary	Responses compact 路径	compact body/path 正规化且保持一元 JSON 语义
+R1-A2	long_context	R1	canary	长文本与压缩	已知哨兵在压缩前后可召回且无异常截断
+R1-A3	long_context	R1	canary	上下文超限负例	正确透传/映射为客户端错误且不连环换号
+R1-A4	long_context	R1	debug	长上下文计费与迁移	字段兼容、usage/费用口径与迁移测试一致
+R1-M1	migration	R1	static	已应用迁移完整性	文件名与 runner TrimSpace checksum 未改写
+R1-M2	migration	R1	ci+debug	全新与连续升级	空库全迁移和持久 debug 库增量迁移均成功
+R1-M3	migration	R1	debug	旧应用兼容	旧镜像在候选 schema 上健康，或明确禁止 image-only rollback
+R1-B1	vision_media	R1	ci	Chat/Responses 图片转换	URL/base64/tool-output 图片 part 保持合法形状
+R1-B2	vision_media	R1	canary	真实 vision	固定可判定图片得到确定答案，流式与非流式一致
+R1-B3	vision_media	R1	canary	Grok Composer 图片桥	视觉描述与后续模型请求都存在且没有假 200
+R1-B4	vision_media	R1	conditional	图片生成/media/batch	仅相关路径变化时验证任务、尺寸、计费和终态
+R1-C1	grok_tools	R1	ci+canary	孤立 tool_choice	tools 被删空后 tool_choice 同时删除，上游不拒绝
+R1-C2	grok_tools	R1	canary	custom/namespace/tool_search	流式和非流式双向恢复类型、call id、arguments 和终态
+R1-C3	grok_tools	R1	canary	多轮工具续接	function output 第二轮可继续且图片输出不丢
+R1-C4	grok_tools	R1	canary	Responses Lite tools	additional_tools、namespace tool_choice 和 cache 不互相覆盖
+R1-D1	model_switch	R1	official-codex	同会话切模型	模型 A→B→Grok→A 后哨兵、工具结果和角色顺序保持
+R1-D2	model_switch	R1	ci+canary	reasoning effort	SharedChat max→xhigh 仅在目标组合生效，其他组合不变
+R1-D3	model_switch	R1	canary	未知模型	返回明确错误，不静默 fallback 到其他模型
+R1-E1	streaming	R1	canary	流式/非流式桥	非流聚合为单 JSON，流式 SSE 事件序和终态完整
+R1-E2	streaming	R1	canary	取消与首包边界	首包前可安全 failover，首包后不混流，取消不误报 502
+R1-E3	streaming	R1	canary	200+SSE failed	response.failed 被识别为失败并按策略重试/透传
+R1-F1	codex_sharedchat	R1	official-codex	完整 Codex 路径	官方客户端 metadata、UA、originator、device id 与路由完整
+R1-F2	codex_sharedchat	R1	canary	API-key passthrough	非流上游 stream 聚合、compact、HTTP/1.1 和账号 proxy 正确
+R1-F3	codex_sharedchat	R1	debug	身份与 header 一致性	网关、后台 Responses probe、允许复现时管理员路径策略一致
+R1-G1	error_policy	R1	ci+canary	错误透传与 failover	401/402/429/5xx/context-window/no-account 分类与重试 owner 正确
+R1-G2	error_policy	R1	canary	双层重试预算	Router 与 Sub2 不重复放大请求，首包后不切换
+R1-H1	scheduling	R1	ci+canary	sticky 与跨组隔离	同 session 粘性、冷却后回退、组间不串号
+R1-H2	scheduling	R1	canary	池模式同账号重试	裸 5xx 与 200+SSE failed 均符合 retry_count 和总预算
+R1-H3	scheduling	R1	debug	调度 snapshot/outbox	多实例缓存/投影一致，无重建风暴
+R1-I1	billing_background	R1	debug	usage 与费用	canary 后 usage、余额、cache token 和费率符合预期
+R1-I2	billing_background	R1	debug	OAuth refresh owner	debug 专属身份无 refresh 风暴，不与生产竞争
+R1-I3	billing_background	R1	debug	probe fixture	完整非敏感 map 保留且 probe 与网关结果不矛盾
+R1-J1	frontend	R1	ci	前端关键路径	类型检查、关键 vitest、账号/分组/设置 UI 契约通过
+R2-1	auth	R2	ci+debug	登录/OAuth/API key	受影响回调、会话和权限边界通过
+R2-2	deployment	R2	ci+debug	Compose/脚本/端口	部署 shell、只 pull app、loopback 和数据卷边界通过
+R2-3	provider_extended	R2	conditional	Claude/Gemini/其他 provider	仅已配置且路径受影响时跑真实最小 canary

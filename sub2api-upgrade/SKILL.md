@@ -1,101 +1,151 @@
 ---
 name: sub2api-upgrade
-description: 安全升级此主机上的 Sub2API 至已验证的上游新版，语义重建 MINE 个性化差异并以上游实现优先处理重叠，再经 debug 充分验证和受控生产切换。用户说“更新sub2”“更新 Sub2API”“升级sub2”“同步 Sub2API 最新版”“升级到最新版本”或要求把 mine 个性化覆盖到新版时使用。覆盖上游同步、职责提交收敛、debug 验证、GitHub Actions 镜像、生产切换、回滚和本次产物收口；不用于账号导入、通用管理 API、K12/Grok OAuth、单独排障或纯源码审查。
+description: 安全且尽可能快速地将此主机上的 Sub2API 升级到已验证的上游新版，语义重建 MINE 个性化差异，复用持久化隔离 debug 数据和按 diff 触发的完整验证矩阵，再执行精确 SHA 绑定、受控生产切换、回滚与收口。用户说“更新sub2”“更新 Sub2API”“升级sub2”“同步 Sub2API 最新版”“升级到最新版本”，或要求优化/审计 Sub2API 升级、debug 验证、升级耗时和测试场景时使用。不用于账号导入、通用管理 API、K12/Grok OAuth 生命周期、单独排障或纯源码审查。
 ---
 
-# Sub2API 安全升级
+# Sub2API 安全快速升级
 
-将“不能导致问题”落实为失败即停止的门禁，不能承诺绝对零风险。用户只说“更新sub2”时，授权本技能执行已验证的正常生产升级、升级专属备份和本技能创建产物的收口；当前请求若明确指定“生产切换前停下”或其他停点，则以当前请求为准。历史会话用于提炼长期控制，不把某次会话的一次性停点或破坏性清理要求自动延续到以后。不授权数据库恢复、删除历史备份、重写已应用迁移、无 lease 强推或改写 `main`、修改生产账号配置、停止共享服务或清理归属不明资源。
+把速度来自复用、并行和确定性脚本，而不是删门禁。不能承诺绝对零风险；任何未解释失败都停止。用户只说“更新sub2”时，授权执行已验证的正常生产升级、升级专属备份和本技能创建产物的收口；当前请求若指定停点则服从停点。历史会话的一次性生产写库、广泛清理或停服务授权不延续。
 
-先读取 [运行时档案](references/runtime-profile.zh-CN.md) 和 [历史事故与控制](references/historical-incidents.zh-CN.md)。再只读检索近期 Sub2API 升级及与本次个性化职责相关的故障会话，把新出现的真实失败模式加入本次矩阵；不要读取或输出生产数据、凭据。每次重新核验档案事实；档案是已知基线，不是绕过实时核验的依据。
+先读取 [运行时档案](references/runtime-profile.zh-CN.md)、[历史事故与控制](references/historical-incidents.zh-CN.md)、[当前个性化职责](references/current-customization-duties.zh-CN.md) 和 [快速流水线](references/fast-upgrade-pipeline.zh-CN.md)。取得候选 diff 后按触发套件读取 [Debug 验证矩阵](references/debug-verification-matrix.zh-CN.md)。近期会话只补充档案尚未覆盖的新失败模式；不要每次从零重读全部历史。
 
 ## 不可跳过的门禁
 
-以下任一项失败时，不改变生产环境，只报告阻塞证据和最小修复路径：
+以下任一项失败时，不改变生产环境：
 
-1. 无法证明目标是 `/root/sub2api-prod-deploy` 的 `sub2api-prod`，或当前生产基线的应用、PostgreSQL、Redis、Router、Nginx 健康检查不全绿。
-2. `/root/sub2api-repo` 有未知工作区改动、`main` 不是干净上游镜像、`mine`/`debug` 的候选提交不清楚，或 GitHub Actions 没有对候选提交成功发布对应分支镜像。
-3. debug 环境不存在、与生产不隔离、未通过与改动范围相符的真实 smoke 测试，或 debug 的镜像 revision 与待发布提交不一致。
-4. 新增或修改迁移却没有验证过的 schema 兼容和回滚方案。任何已应用迁移文件的改写都直接停止，不修补 checksum，不合并历史迁移。
-5. 无法证明旧应用镜像在目标 schema 上可安全回退。生产脚本只在此证明成立时接受 `--rollback-image-safe`。
-6. Watchtower 实际状态、目标镜像来源、运行中写任务或生产数据卷边界不清楚。
-7. 推进 `debug` 前没有完成逐职责语义对照，或推进 `mine`/生产前没有让最终候选 SHA 通过完整 debug 双向回归和日志门禁。
+1. 无法证明目标是 `/root/sub2api-prod-deploy` 的 `sub2api-prod`，或生产应用、PostgreSQL、Redis、Router、Nginx 基线不全绿。
+2. `/root/sub2api-repo` 有未知改动，`main` 不是纯 `upstream/main`，候选职责不清，或候选上游基线/版本早于当前生产。必须用 `plan-sub2api-upgrade.sh` 和源码复核阻止版本倒退；合法语义重建不要求旧 `mine` 是候选祖先。
+3. 没有逐职责完成“旧实现 -> 新上游 -> 剩余差异 -> 自动测试 -> debug canary”的语义对照，或把旧补丁机械 rebase/cherry-pick。
+4. 精确候选 SHA 的 CI、固定分支镜像、隔离 debug、最终完整矩阵和日志门禁任一未通过。SHA、镜像 digest、debug 配置指纹或 fixture 指纹变化都会使相关旧证据失效。
+5. 新增/修改迁移没有隔离升级演练、runner 口径 checksum 核验和旧应用兼容证明；已应用迁移文件被改写时直接停止，不修补数据库 checksum。
+6. 无法证明旧应用镜像在目标 schema 上可安全回退。生产脚本只在此证明成立时接受 `--rollback-image-safe`。
+7. Watchtower 状态、后台写任务、数据卷或目标镜像来源不清；不得使用浮动标签替代精确 revision 证据。
 
-缺少 debug 环境不是“直接上 mine”的理由。可以修复或重建隔离 debug 环境，但不得复制生产凭据或未脱敏生产数据；隔离证明不足时不部署生产。
+不授权自动数据库恢复、删除历史备份、修改生产账号配置、停共享任务、清理归属不明资源、无 lease 强推或改写 `main`。
+
+## 提速原则
+
+1. **一次成型再推 debug**：先完成静态语义对照、`git diff --check`、迁移检查和测试映射，避免每个小修复都消耗一轮 5–12 分钟 CI。
+2. **等待并行化**：CI 运行时并行准备 fixture 快照、负例清单、只读生产 preflight 和报告，不反复人工轮询。用 `wait-branch-image.sh` 绑定 run、SHA 和固定镜像。
+3. **保留 debug 数据骨架**：停止容器但保留隔离的 PostgreSQL/Redis/Sub2API 数据目录、合成 fixture 和历史迁移状态。禁止复制生产卷、生产凭据或让同一 OAuth 身份同时由 debug/生产刷新。
+4. **按 diff 选择，按职责兜底**：始终跑 `R0`；再跑变更路径触发的套件和所有保留个性化职责对应套件。中间修复可增量复测，最终 SHA 必须跑完整选中矩阵。
+5. **只缓存稳定证据**：职责映射、合成 fixture、已验证测试名可跨升级复用；实时健康、外部 canary、日志、schema、镜像和回退兼容不能跨 SHA 复用。
+6. **生产最后动**：远端构建、debug、dump 与回退准备全部完成后，才 recreate 生产应用；生产切换本身不是主要耗时点。
 
 ## 合并与提交纪律
 
-升级不是把旧 `mine` 原样 rebase/cherry-pick 到新版。先以 `merge-base` 枚举旧 `mine` 的个性化逻辑提交，再为每个提交写出“核心职责 -> 旧实现 -> 新上游实现 -> 仍缺差异 -> 验证项”的可审计对照；没有完成对照不得推 `debug`：
-
-1. 上游已经等价或更完整实现的部分一律采用上游，不重放旧补丁；部分重叠时只补上游缺失的行为和测试。账号级 header、proxy、模型映射或其他配置能够完整表达行为时优先配置，不新增硬编码补丁。任何旧实现优于上游的判断必须有源码和测试证据。
-2. 保留原有个性化功能的职责边界，而不是保留每个旧 diff hunk。废弃、冲突或已无必要的旧代码应从候选中消失，并记录被哪个上游实现取代。
-3. 不用一次性 merge、盲目 rebase 或连续 cherry-pick 代替语义审计。用独立候选分支重建差异，并以 `range-diff`、逐提交 diff 和测试矩阵复核没有漏功能或带回重复实现。
-4. 个性化提交保持少量、稳定、可审计的逻辑提交。目标职责数为升级前逻辑职责数与 5 的较小值；旧职责超过 5 个时按相关核心内容收敛，少于 5 个时不为凑数拆分或新增提交。debug 中发现的修复必须 amend/fixup 回所属逻辑提交，最终 `debug`/`mine` 不留下零散“修复合并问题”提交。
-5. `main` 必须精确等于已核验的 `upstream/main`，不包含部署文档、分支工作流或个性化代码；个性化只叠加在 `debug`/`mine` 候选上。
-6. 语义重建导致候选不是旧 `debug`/`mine` 的 fast-forward 时，先核验远端旧 SHA，再只对目标分支使用精确 `--force-with-lease=refs/heads/<branch>:<verified-old-sha>`。禁止裸 `--force`，禁止用过期 lease 覆盖并发更新，禁止改写 `main`；`mine` 只能改写为已经在 `debug` 完整验证的完全相同 SHA。
+1. 以 `merge-base` 枚举旧 `mine` 职责。上游等价或更完整的能力采用上游；部分重叠只补缺失行为和测试。能由账号级 header、proxy、模型映射等配置完整表达时优先配置。
+2. 保留职责，不保留每个旧 hunk。记录每个删除的旧实现被哪个上游实现取代，并以测试或运行证据证明等价。
+3. 个性化提交保持少量、稳定、可审计。职责提交数不超过旧职责数与 5 的较小值；debug 修复 amend/fixup 回所属职责，最终历史不留零散修复提交。
+4. `main` 精确等于已核验 `upstream/main`；部署文档、工作流和个性化代码只在 `debug`/`mine`。
+5. 非 fast-forward 时先核验远端旧 SHA，只对目标分支使用精确 `--force-with-lease=refs/heads/<branch>:<verified-old-sha>`。禁止裸 `--force`；`mine` 只能指向 debug 完整验证过的相同 SHA。
 
 ## 标准流程
 
-### 1. 建立发布候选
+### 1. 建立候选与计划
 
-1. 在 `/root/sub2api-repo` 读取 `AGENTS.md`、`BRANCH_DEPLOYMENT.md` 和本次改动关联源码/测试。
-2. 仅用只读 Git 检查确认 `origin`、`upstream`、工作树、`main`、`mine`、`debug` 和候选 commit。保留用户已有改动；不要用 `reset --hard`、无证据的 `checkout` 或强推来“同步”。
-3. 将 `main` 快进为纯 `upstream/main` 镜像；按“合并与提交纪律”逐职责重建个性化候选，不把旧提交机械重放到新上游。
-4. 检查候选差异中的迁移、Compose、路由、协议转换、provider 适配、Redis/PostgreSQL 行为和后台任务。新迁移只能新增，不能改写已部署文件。
-5. 把候选先推到 `debug`，等待该 commit 的 `Docker Branch Images` 成功。不得在服务器构建、下载依赖、运行包管理器或构建 Docker 镜像。
-
-### 2. 在 debug 完成与改动相符的验证
-
-本项目历史语境中用户口述的“第八个分支”即 `debug` 隔离验证分支；若实时分支布局与此不符，先核验映射，不能跳过隔离验证。
-
-1. 只从 `ghcr.io/wesperez/sub2api:debug` 拉取 debug 应用镜像，保持 debug 的数据库、Redis、端口、数据目录、凭据和网络与生产隔离。
-2. 记录 debug 容器 image revision、启动前后 schema 版本和测试结果。debug 需要生产形态数据时使用最小化脱敏副本，不能挂载生产卷。测试前快照合成 fixture 的非敏感配置；更新 map 型账号配置时提交完整非敏感字段，测试后验证或恢复 fixture，避免把测试数据损坏误判为候选缺陷。
-3. 始终验证启动/迁移日志无未解释错误、`/health`、登录/鉴权路径、账号与分组读取、最小真实 Responses 请求、流式请求和受影响分组的 canary。没有配置的可审计 canary 时，不能以“看起来容器正常”代替测试。
-4. 按改动补充矩阵：
-   - Grok/tools：覆盖 custom、namespace、tool_search 的流式/非流式双向转换，以及 `tools` 被转换或删除后仍带 `tool_choice` 的请求，确认不会把孤立 `tool_choice` 发到上游；涉及图片桥或近期识图故障时增加真实 vision/multimodal canary。
-   - Codex/SharedChat：覆盖完整 `/codex/responses`、所需 client metadata/header、非流式聚合、流式、compact、`reasoning.effort=max` 映射、HTTP/1.1 和账号级代理；实际网关请求、后台 Responses probe 和管理员账号测试三条路径都必须命中同一身份与传输策略。
-   - OpenAI Responses：覆盖不支持参数的过滤或明确透传策略，不能把客户端参数错误误归因于 Sub2API。
-   - 迁移：在隔离库演练升级和候选前镜像回退，确认数据、账号和任务状态兼容。
-5. 执行双向回归：逐个证明所有保留的个性化职责确实生效，并证明其触达的上游核心流程仍按本次目标上游基线工作。至少覆盖普通 OpenAI Chat/Responses、流式/非流式、鉴权、调度/错误透传、已配置 provider canary；前端、后台任务或计费被差异触及时扩展对应场景。
-6. 对每个“由上游取代”的旧行为，用上游测试、候选 CI 或 debug 运行证据确认等价，而不是仅凭代码看起来相似。预先列出故意触发的负例及其时间窗、预期状态码和日志；检查候选启动后及 canary 时间窗内的日志，区分这些已解释负例与候选故障。任何 panic、迁移失败、5xx、非预期 4xx、协议异常或未被负例解释的新增 error 日志都必须定位、修复并重测，不能作为“偶发”忽略。
-7. 任何 debug 失败先修复，把修复收回所属逻辑提交，重建相同候选镜像并从头重跑相关矩阵；不得把“修复后未测”或只测临时 commit 的结果推进 mine。最终候选 SHA 的完整 debug 双向回归和日志门禁全部通过前，禁止推 `mine` 或切换生产。无法承诺外部服务永不故障，但发布时必须做到没有已知、未解释的候选错误。
-
-### 3. 推进已验证版本
-
-1. 将经过完整 debug 验证的完全相同 commit 推进 `mine`；等待该 commit 的 `Docker Branch Images` 成功，确认 GHCR `mine` image label `org.opencontainers.image.revision` 等于完整 Git SHA。若为收敛提交而重写过候选 SHA，旧 debug 结果全部失效，必须重新构建和验证新 SHA。
-2. 稳态让 `debug` 与 `mine` 指向同一 commit。debug 专属实验提交、临时工作树和镜像只在当前测试结束且不再需要时收口。
-3. 生产切换前读取当前服务状态、镜像 ID/revision、数据卷、Watchtower 实际命令、后台写任务状态，并建立单次 PostgreSQL 自定义格式 dump。不要回显 `.env`、token、数据库密码或 dump 内容。本机 Codex 或当前会话可能依赖生产 Sub2API 链路时，把应用 recreate 放到所有远端构建、debug 验证和回滚准备完成后的最后一步，避免中途切断自身控制链路。
-4. 仅在已验证旧应用可回退时执行：
+1. 读取仓库 `AGENTS.md`、`BRANCH_DEPLOYMENT.md` 和关联源码/测试；刷新 `origin`、`upstream` refs，确认工作树与分支头。
+2. 记录运行中生产 revision。完成语义重建后运行：
 
 ```bash
-cd /root/.codex/skills/sub2api-upgrade
+bash scripts/plan-sub2api-upgrade.sh \
+  --running-revision <current-production-sha> \
+  --candidate-revision <candidate-sha> \
+  --upstream-ref upstream/main
+```
+
+脚本会阻止候选上游基线或 `VERSION` 倒退，并按升级 diff 与候选个性化 diff 选择测试套件。需要落盘时，`--output-dir` 只能是 `/root/backups/sub2api/upgrade-evidence/` 的直接子目录；人工仍须审查它没有漏掉动态配置和间接调用路径。
+3. 检查迁移、Compose、路由、协议转换、provider、Redis/PostgreSQL、后台任务和前端影响。新迁移只追加。
+4. 候选静态审计完成后才推 `debug`，避免用远端 CI 代替本可提前发现的语法、格式和职责问题。
+
+### 2. 等待精确 debug 镜像
+
+```bash
+bash scripts/wait-branch-image.sh \
+  --branch debug \
+  --expected-revision <candidate-sha> \
+  --pull
+```
+
+只接受 `Docker Branch Images` 对该完整 SHA 的成功 run，以及 `debug-sha-<40sha>` 不可变镜像中匹配的 revision/ref label 和 digest。等待期间完成可并行准备；CI 失败后读取精确 job 证据，先在本地静态修完同类问题再推下一 SHA。
+
+### 3. 复用隔离 debug 并验证
+
+1. 先运行 `check-debug-isolation.sh`。debug 必须使用 `/root/sub2api-debug-deploy`、独立 Compose project/数据目录/网络、loopback 端口和 `:debug` 镜像，生产 Router 永不指向 debug。
+2. 保留 debug 数据目录作为“连续升级数据库”：先用 `check-debug-fixture-manifest.sh` 校验非敏感 fixture，再用 `snapshot-debug-postgres.sh` dry-run；确认目标只在 `/root/backups/sub2api/debug-snapshots/` 后才 `--apply`。候选迁移后复核数据。停止用 `docker compose stop`，不因常规收口删除数据目录或卷。
+3. debug 只保存合成数据和专属 canary 身份。真实 canary 凭据必须只属于 debug，不与生产共享 refresh owner；不得从生产整库复制账号、token、余额、日志或用户数据。
+4. 按 [Debug 验证矩阵](references/debug-verification-matrix.zh-CN.md) 执行：
+   - `R0` 永远全跑。
+   - 路径触发的 `R1/R2` 全跑。
+   - 每个保留个性化职责至少有一个正向 canary 和一个触达核心上游流程的回归断言。
+   - 真实生成烟测遵守全局规则：使用有意义的代表任务、控制次数和预算；官方 Codex 链路只能由当前官方客户端发起；禁止 Sub2API `Test Connection` 和伪造 Codex 请求头。
+5. 用 `compute-debug-config-fingerprint.sh --json` 生成统一的非敏感配置指纹，再用 `run-debug-matrix.sh` 记录可恢复 attempt。中间修复时跑 `R0 + 受影响套件 + 日志窗`；任何新 commit 都使旧 SHA 证据失效。最终 commit 使用 `mode=release` 重新跑完整选中矩阵，passed case 必须带证据，R0-7 必须带日志窗；R0-1/R0-8 使用 `references/*-evidence.template.json` 的机器契约，人工 case 使用 `manual-verification-evidence.template.json`，最后 `seal` 生成 `release-evidence.json`。
+   先用 `run-debug-adapter.sh run-ready --run-dir <dir>` 串行处理全部未完成 case；它跨 run 共用 debug 全局锁，把 R0-7 固定到最后，并按 blocked(71) > failed(70) > needs_manual(78) > passed(0) 汇总。当前只有 R0-1、R0-2、R0-7 是自动 adapter；其余场景在经过真实 debug 审计并落地 case 脚本前明确为 manual。自动 pass 必须绑定同 attempt 的 adapter checkpoint；manual pass 必须是结构化 JSON，普通文字、占位证据、任意 shell/URL/path 都不能进入 release seal。中断的 `no_replay` 请求只收束为 blocked，不自动重发。
+6. 预列故意负例的 UTC 时间窗、预期状态码和日志形状。任何 panic、迁移失败、HTTP 200 后的 `response.failed`、非预期 4xx/5xx、协议终态缺失或新增未解释 error 都必须定位。
+
+### 4. 推进同一 SHA
+
+1. 只有最终 debug 完整通过后，才让 `mine` 指向完全相同 SHA。若收敛提交改变 SHA，旧 debug 证据全部失效。
+2. 先用 `verify-release-evidence.sh` 重新计算 sealed evidence，并使用其 `source_run_id`；该值来自 R0-1 的实际 Docker workflow run。再从 `mine` ref 调度 `Promote Debug Image`，输入同一 SHA、source run、exact digest 和 evidence SHA。workflow 只 carbon-copy `image@digest`，不重建、不改 config；因此 promoted 镜像内 `ref.name=debug` 必须保留。
+
+```bash
+evidence_json="$(bash scripts/verify-release-evidence.sh \
+  --evidence <matrix-run-dir/release-evidence.json> \
+  --expected-revision <sha> \
+  --expected-digest <digest>)"
+evidence_sha="$(jq -r '.sha256' <<<"$evidence_json")"
+source_run_id="$(jq -r '.source_run_id' <<<"$evidence_json")"
+gh workflow run promote-debug-image.yml \
+  --repo WesPerez/sub2api \
+  --ref mine \
+  -f expected_revision=<sha> \
+  -f source_digest=<digest> \
+  -f source_run_id="$source_run_id" \
+  -f verification_evidence_sha256="$evidence_sha"
+```
+
+3. 用 `verify-promoted-image.sh --pull` 核验 promotion run、唯一 receipt artifact、evidence SHA 和 `mine-sha-<40>@digest`。禁止手工 retag，禁止用浮动 `:mine` 或短 SHA 当发布权威。
+4. 稳态让 `debug`、`mine` 同 SHA。临时 debug 提交仅在本次测试完成后按精确 lease 收口。
+
+### 5. 生产切换与验证
+
+1. 运行生产脚本 dry-run 预检；再次实时核验服务、数据卷、Watchtower、后台写任务和当前 image revision。
+2. 仅在旧镜像回退兼容已在 debug 证明时执行：
+
+```bash
 bash scripts/update-sub2api.sh \
   --apply \
   --expected-revision <40-char-git-sha> \
+  --expected-digest <sha256:64-hex> \
+  --promotion-run-id <github-actions-run-id> \
+  --verification-evidence <matrix-run-dir/release-evidence.json> \
   --rollback-image-safe
 ```
 
-该脚本只会 `pull sub2api` 和 `up -d --no-deps sub2api`。它拒绝全量 `docker compose pull`、`compose down`、本地构建、debug 镜像、`latest`、PostgreSQL/Redis 升级和来源不明的镜像。默认调用不带 `--apply` 时只预检。
-
-### 4. 生产验证与回退
-
-1. 生产脚本等待应用容器健康，并验证 `127.0.0.1:13080/health`、从 Nginx named upstream 实时解析出的 Router 活跃槽（`13082`/`13083`）`/ready`，以及经本机 Nginx/SNI 的 `https://wooai.cc.cd/ready`；不得把蓝绿槽中的某一个端口写死。
-2. 再运行已在 debug 通过的低风险 canary。验证失败时脚本只会在已明确证明 image rollback 兼容时回退应用镜像；绝不自动 restore PostgreSQL。
-3. 数据库恢复、配置变更、删除账号、停共享任务或任何涉及真实上游写入的补救操作需要单独明确授权和自己的恢复方案。
-4. 结果至少报告：候选 SHA、CI run、旧/新 image revision、dump 路径与 sha256、健康检查、canary、是否回退和仍在等待的收口项。
+脚本先重新验算 sealed matrix 与 promotion receipt，并实时确认 `origin/mine`、`origin/debug` 仍等于候选，再拉取 `mine-sha-<40>@digest`、建立 PostgreSQL dump，只 recreate `sub2api`，并在运行态复核 image ID、revision、digest、内容身份、Router 活跃槽和 Nginx/SNI。它不更新 PostgreSQL/Redis，也不自动恢复数据库。
+3. 再执行 debug 已通过的低风险生产 canary 和日志窗检查。失败时只在已证明 image rollback 兼容时回退应用；数据库恢复、配置变更和账号处置需要单独授权。
+4. 报告候选 SHA、上游基线、职责对照、CI run、image digest、schema、fixture 指纹、矩阵结果、日志窗、旧/新 revision、dump sha256、健康、canary 与回退状态。
 
 ## 升级后收口
 
-把可回滚证据视为恢复资产，不把它当垃圾：
-
-1. debug 是由本次升级启动的，且没有活跃测试时，停止该 debug Compose 项目；不停止归属不明的 debug、Router、Nginx、数据库或任务服务。
-2. 生产稳定窗口结束后，使用 `scripts/finalize-sub2api-upgrade.sh --run-id <run-id> --apply`。它会重新验证当前 revision/健康状态，只删除该 run 创建且无容器引用的 rollback image tag，保留 dump、配置快照和审计记录。
-3. 仅在至少保留两个已验证 recovery runs、候选 run 已 finalized 且超过保留窗口后，使用该脚本的 `--prune --apply` 删除带本技能 owner marker 的旧 run。不要使用 `docker system prune`、宽泛 `find -delete`、按名称猜测清理或删除现有 `/root/backups/sub2api` 内容。
-4. 任何因失败、中断或归属不明而留下的目录、镜像、卷、日志、分支、GitHub run 或备份都保留并报告；先查归属，再决定处置。
+1. 仅停止本次启动且无活跃测试的 debug Compose；保留其数据目录和合成 fixture。不要停止归属不明的 Router、Nginx、数据库或任务服务。
+2. 稳定窗口后先运行 `finalize-sub2api-upgrade.sh --list`，再对目标 run dry-run；确认后才加 `--apply`。finalize 只释放本 run rollback tag，保留 dump、配置和 manifest。
+3. 只有至少保留两个已验证 recovery runs、候选已 finalized 且超过保留窗，才使用 `--prune --apply`。禁止 `docker system prune`、宽泛删除或清理 Git dangling objects。
+4. 失败、中断、归属不明或证据不完整的目录、镜像、卷、日志、分支和备份都保留并报告。
 
 ## 运行时脚本
 
-- `scripts/update-sub2api.sh`：生产预检、应用专属 rollout、PostgreSQL 回滚点、验证和受限 image rollback。
-- `scripts/finalize-sub2api-upgrade.sh`：稳定后释放本 run 的 rollback tag，并以默认 dry-run 规划受控保留清理。
+- `scripts/plan-sub2api-upgrade.sh`：只读验证版本/上游基线并按 diff 生成矩阵计划。
+- `scripts/wait-branch-image.sh`：等待精确 GitHub run，验证固定分支镜像 revision/digest。
+- `scripts/check-debug-isolation.sh`：只读检查 debug 路径、镜像、端口、数据目录与生产隔离。
+- `scripts/compute-debug-config-fingerprint.sh`：从稳定隔离字段、Compose 原文件、环境键集合和配置键路径计算非敏感指纹。
+- `scripts/check-debug-fixture-manifest.sh`：校验合成 fixture、字段集规范哈希与敏感信息边界。
+- `scripts/snapshot-debug-postgres.sh`：默认 dry-run，只向 debug snapshot 白名单建立 PostgreSQL 备份。
+- `scripts/run-debug-matrix.sh`：可恢复地记录、复测、密封最终 SHA 的 debug 证据。
+- `scripts/run-debug-adapter.sh`：按固定 allowlist 串行批跑或执行单 case，保存 checkpoint、截取 debug Compose UTC 日志并恢复未完成步骤。
+- `scripts/verify-release-evidence.sh`：只读复核 sealed matrix、R0、证据/日志和绑定哈希。
+- `scripts/verify-promoted-image.sh`：只读核验 promotion run/receipt，并可拉取 exact digest。
+- `scripts/update-sub2api.sh`：生产预检、固定 SHA 镜像、应用专属 rollout、dump、验证和受限 image rollback。
+- `scripts/finalize-sub2api-upgrade.sh`：列出 run、稳定后释放 rollback tag、受控保留清理。
 
-运行脚本前用 `bash -n scripts/*.sh`。不要为了“验证”在服务器运行本仓库的 Go/Node 构建或测试；CI 和已发布 image metadata 才是服务器上的构建证据。
+运行脚本前用 `bash -n scripts/*.sh`。服务器禁止本地 Go/Node 构建、包管理器和 Docker build；GitHub Actions 与已发布 image metadata 才是构建证据。

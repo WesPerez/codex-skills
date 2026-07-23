@@ -8,14 +8,24 @@ readonly COMPOSE_FILE="$DEPLOY_DIR/docker-compose.yml"
 readonly ENV_FILE="$DEPLOY_DIR/.env"
 readonly RUN_ROOT="/root/backups/sub2api/upgrade-runs"
 readonly APPLY_LOCK_FILE="/run/lock/sub2api-upgrade.lock"
-readonly APP_IMAGE="ghcr.io/wesperez/sub2api:mine"
+readonly APP_IMAGE_REPOSITORY="ghcr.io/wesperez/sub2api"
+readonly APP_IMAGE="$APP_IMAGE_REPOSITORY:mine"
 readonly APP_HEALTH_URL="http://127.0.0.1:13080/health"
 readonly ROUTER_UPSTREAM_CONFIG="/etc/nginx/conf.d/codex-unified-router-upstream.conf"
 readonly PUBLIC_HOST="wooai.cc.cd"
 readonly HEALTH_TIMEOUT_SECONDS=180
+readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly PLAN_SCRIPT="$SCRIPT_DIR/plan-sub2api-upgrade.sh"
+readonly RELEASE_EVIDENCE_SCRIPT="$SCRIPT_DIR/verify-release-evidence.sh"
+readonly PROMOTION_VERIFY_SCRIPT="$SCRIPT_DIR/verify-promoted-image.sh"
+readonly SOURCE_REPO="/root/sub2api-repo"
 
 MODE="preflight"
 EXPECTED_REVISION=""
+EXPECTED_DIGEST=""
+PROMOTION_RUN_ID=""
+VERIFICATION_EVIDENCE=""
+VERIFICATION_EVIDENCE_SHA256=""
 ROLLBACK_IMAGE_SAFE=0
 RUN_ID=""
 RUN_DIR=""
@@ -25,20 +35,31 @@ CURRENT_IMAGE_ID=""
 CURRENT_REVISION=""
 CANDIDATE_IMAGE_ID=""
 CANDIDATE_REVISION=""
+CANDIDATE_IMAGE_REF=""
+CANDIDATE_REPO_DIGESTS=""
+SOURCE_PLAN_JSON=""
+RELEASE_EVIDENCE_JSON=""
+PROMOTION_VERIFICATION_JSON=""
+CURRENT_REPO_DIGESTS=""
 PRESERVE_ARTIFACTS=0
 ROLLOUT_STARTED=0
 ROLLOUT_COMPLETE=0
 FAILURE_HANDLED=0
+SUCCESS_COMMIT_STARTED=0
 
 usage() {
   cat <<'USAGE'
 Usage:
   update-sub2api.sh [--preflight]
-  update-sub2api.sh --apply --expected-revision <40-char-git-sha> --rollback-image-safe
+  update-sub2api.sh --apply --expected-revision <40-char-git-sha> \
+    --expected-digest <sha256:64-hex> --promotion-run-id <digits> \
+    --verification-evidence <run-dir/release-evidence.json> \
+    --rollback-image-safe
 
 Default mode is read-only preflight. Apply mode only updates the production
 sub2api service after it verifies a published mine image, creates a PostgreSQL
-dump, and tags the currently running application image for rollback.
+  sealed debug evidence, exact-digest promotion receipt, a PostgreSQL dump, and
+  the currently running application image for rollback.
 USAGE
 }
 
@@ -75,6 +96,18 @@ image_label() {
   docker image inspect -f "{{index .Config.Labels \"$label\"}}" "$image"
 }
 
+image_repo_digests_json() {
+  docker image inspect -f '{{json .RepoDigests}}' "$1"
+}
+
+repo_digests_match() {
+  local repo_digests="$1" expected="$2"
+  jq -e --arg repo "$APP_IMAGE_REPOSITORY" --arg digest "$expected" '
+    type=="array"
+    and ([.[] | select(.==($repo + "@" + $digest))] | length)==1
+  ' >/dev/null <<<"$repo_digests"
+}
+
 container_health() {
   docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$1"
 }
@@ -83,6 +116,62 @@ last_manifest_value() {
   local key="$1"
   local file="$2"
   awk -F= -v key="$key" '$1 == key {value = substr($0, length(key) + 2)} END {print value}' "$file"
+}
+
+prove_running_promoted_image() {
+  [[ -d "$RUN_ROOT" ]] || return 1
+  local run_dir manifest status revision digest image_id promotion_run evidence_sha
+  local evidence_copy promotion_copy evidence_copy_sha promotion_copy_sha recorded_promotion_sha
+  local evidence_source_run promotion_source_run
+  local -a runs=()
+  shopt -s nullglob
+  runs=("$RUN_ROOT"/upgrade-*)
+  shopt -u nullglob
+  local index
+  for (( index=${#runs[@]}-1; index>=0; index-- )); do
+    run_dir="${runs[$index]}"
+    [[ -d "$run_dir" ]] || continue
+    [[ "$(cat "$run_dir/.owner" 2>/dev/null || true)" == "sub2api-upgrade-v1" ]] || continue
+    manifest="$run_dir/manifest.env"
+    [[ -f "$manifest" ]] || continue
+    status="$(last_manifest_value status "$manifest")"
+    [[ "$status" == "passed_pending_finalization" || "$status" == "finalized" ]] || continue
+    revision="$(last_manifest_value candidate_revision "$manifest")"
+    digest="$(last_manifest_value expected_digest "$manifest")"
+    image_id="$(last_manifest_value candidate_image_id "$manifest")"
+    promotion_run="$(last_manifest_value promotion_run_id "$manifest")"
+    evidence_sha="$(last_manifest_value verification_evidence_sha256 "$manifest")"
+    [[ "$revision" == "$CURRENT_REVISION" && "$image_id" == "$CURRENT_IMAGE_ID" ]] || continue
+    [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || continue
+    repo_digests_match "$CURRENT_REPO_DIGESTS" "$digest" || continue
+    [[ "$promotion_run" =~ ^[0-9]+$ && "$evidence_sha" =~ ^[0-9a-f]{64}$ ]] || continue
+
+    evidence_copy="$run_dir/verification-release-evidence.json"
+    promotion_copy="$run_dir/promotion-verification.json"
+    [[ -f "$evidence_copy" && ! -L "$evidence_copy" && -f "$promotion_copy" && ! -L "$promotion_copy" ]] || continue
+    evidence_copy_sha="$(sha256sum "$evidence_copy" | awk '{print $1}')"
+    promotion_copy_sha="$(sha256sum "$promotion_copy" | awk '{print $1}')"
+    recorded_promotion_sha="$(last_manifest_value promotion_verification_sha256 "$manifest")"
+    [[ "$evidence_copy_sha" == "$evidence_sha" && "$promotion_copy_sha" == "$recorded_promotion_sha" ]] || continue
+    evidence_source_run="$(jq -r '.bindings.source_run_id // empty | tostring' "$evidence_copy")"
+    promotion_source_run="$(jq -r '.promotion.source_run_id // empty | tostring' "$promotion_copy")"
+    [[ "$evidence_source_run" =~ ^[0-9]+$ && "$promotion_source_run" == "$evidence_source_run" ]] || continue
+    jq -e --arg run "$promotion_run" --arg revision "$revision" --arg digest "$digest" --arg evidence "$evidence_sha" \
+      --arg source_run "$evidence_source_run" '
+      (.promotion.promotion_run_id|tostring)==$run
+      and .promotion.revision==$revision
+      and .promotion.source_digest==$digest
+      and .promotion.target_digest==$digest
+      and (.promotion.source_run_id|tostring)==$source_run
+      and .promotion.verification_evidence_sha256==$evidence
+      and .image.pulled==true
+      and .image.revision==$revision
+      and .image.digest==$digest
+      and .image.ref_name=="debug"
+    ' "$promotion_copy" >/dev/null || continue
+    return 0
+  done
+  return 1
 }
 
 record() {
@@ -101,6 +190,12 @@ release_rollback_tag() {
   fi
 }
 
+restore_local_app_tag() {
+  [[ -n "$CURRENT_IMAGE_ID" && -n "$CANDIDATE_IMAGE_ID" ]] || return 0
+  docker image tag "$CURRENT_IMAGE_ID" "$APP_IMAGE" >/dev/null
+  [[ "$(docker image inspect -f '{{.Id}}' "$APP_IMAGE")" == "$CURRENT_IMAGE_ID" ]]
+}
+
 discard_unrolled_run() {
   [[ -n "$RUN_DIR" && -d "$RUN_DIR" ]] || return 0
   [[ "$(cat "$RUN_DIR/.owner" 2>/dev/null || true)" == "sub2api-upgrade-v1" ]] || return 0
@@ -115,6 +210,14 @@ on_exit() {
   trap - EXIT
   trap '' INT TERM
   if (( status != 0 && ROLLOUT_STARTED == 1 && ROLLOUT_COMPLETE == 0 && FAILURE_HANDLED == 0 )); then
+    if (( SUCCESS_COMMIT_STARTED == 1 )) && [[ -n "$RUN_DIR" && -f "$RUN_DIR/manifest.env" ]] \
+      && [[ "$(last_manifest_value status "$RUN_DIR/manifest.env")" == "passed_pending_finalization" ]] \
+      && [[ "$(docker image inspect -f '{{.Id}}' "$APP_IMAGE" 2>/dev/null || true)" == "$CANDIDATE_IMAGE_ID" ]] \
+      && [[ "$(docker inspect -f '{{.Image}}' "$(compose ps -q sub2api 2>/dev/null)" 2>/dev/null || true)" == "$CANDIDATE_IMAGE_ID" ]]; then
+      ROLLOUT_COMPLETE=1
+      warn "rollout completion was already committed; preserving the verified candidate instead of rolling it back"
+      return
+    fi
     warn "rollout exited unexpectedly; attempting the proven application-only rollback"
     if [[ -n "$RUN_DIR" && -f "$RUN_DIR/manifest.env" ]]; then
       printf 'status=unexpected_exit\n' >> "$RUN_DIR/manifest.env" || true
@@ -134,6 +237,7 @@ on_exit() {
     return
   fi
   if (( status != 0 && PRESERVE_ARTIFACTS == 0 )); then
+    restore_local_app_tag || warn "could not restore the local mine tag to the running image"
     release_rollback_tag || warn "could not remove pre-rollout rollback tag: $ROLLBACK_TAG"
     discard_unrolled_run || warn "could not remove incomplete pre-rollout run: $RUN_DIR"
   fi
@@ -242,8 +346,21 @@ collect_running_state() {
 
   CURRENT_IMAGE_ID="$(docker inspect -f '{{.Image}}' "$CURRENT_CONTAINER")"
   CURRENT_REVISION="$(image_label "$CURRENT_IMAGE_ID" "org.opencontainers.image.revision")"
+  CURRENT_REPO_DIGESTS="$(image_repo_digests_json "$CURRENT_IMAGE_ID")"
   [[ "$CURRENT_REVISION" =~ ^[0-9a-f]{40}$ ]] || die "running image has no valid Git revision label"
-  [[ "$(image_label "$CURRENT_IMAGE_ID" "org.opencontainers.image.ref.name")" == "mine" ]] || die "running application image is not a mine image"
+  local current_ref_name
+  current_ref_name="$(image_label "$CURRENT_IMAGE_ID" "org.opencontainers.image.ref.name")"
+  case "$current_ref_name" in
+    mine)
+      ;;
+    debug)
+      prove_running_promoted_image \
+        || die "running debug-labeled image has no matching successful owner-marked promotion rollout proof"
+      ;;
+    *)
+      die "running application image has unsupported ref.name: ${current_ref_name:-<missing>}"
+      ;;
+  esac
 }
 
 run_preflight() {
@@ -273,13 +390,64 @@ create_run() {
   chmod 0600 "$RUN_DIR/manifest.env"
   install -m 0600 "$COMPOSE_FILE" "$RUN_DIR/docker-compose.yml"
   install -m 0600 "$ENV_FILE" "$RUN_DIR/.env"
+  local evidence_source evidence_run_dir promotion_source_run evidence_source_run
+  evidence_source="$(jq -r '.evidence' <<<"$RELEASE_EVIDENCE_JSON")"
+  evidence_run_dir="$(jq -r '.run_dir' <<<"$RELEASE_EVIDENCE_JSON")"
+  promotion_source_run="$(jq -r '.promotion.source_run_id|tostring' <<<"$PROMOTION_VERIFICATION_JSON")"
+  evidence_source_run="$(jq -r '.source_run_id|tostring' <<<"$RELEASE_EVIDENCE_JSON")"
+  [[ "$promotion_source_run" == "$evidence_source_run" ]] \
+    || die "promotion source run differs from the sealed R0-1 workflow run"
+  [[ -f "$evidence_source" && "$(dirname -- "$evidence_source")" == "$evidence_run_dir" ]] \
+    || die "verified release evidence source disappeared before run creation"
+  install -m 0600 "$evidence_source" "$RUN_DIR/verification-release-evidence.json"
+  install -m 0600 "$evidence_run_dir/plan.json" "$RUN_DIR/verification-plan.json"
+  install -m 0600 "$evidence_run_dir/fixture-manifest.json" "$RUN_DIR/verification-fixture-manifest.json"
+  install -m 0600 "$evidence_run_dir/matrix-catalog.tsv" "$RUN_DIR/verification-matrix-catalog.tsv"
+  install -m 0600 "$evidence_run_dir/adapter-catalog.tsv" "$RUN_DIR/verification-adapter-catalog.tsv"
+  install -m 0600 "$evidence_run_dir/config-fingerprint.json" "$RUN_DIR/verification-config-fingerprint.json"
+  printf '%s\n' "$PROMOTION_VERIFICATION_JSON" > "$RUN_DIR/promotion-verification.json"
+  chmod 0600 "$RUN_DIR/promotion-verification.json"
+  [[ "$(sha256sum "$RUN_DIR/verification-release-evidence.json" | awk '{print $1}')" == "$VERIFICATION_EVIDENCE_SHA256" ]] \
+    || die "copied release evidence checksum changed"
+  local copied_path copied_sha
+  while IFS=$'\t' read -r copied_path copied_sha; do
+    [[ "$copied_sha" =~ ^[0-9a-f]{64}$ ]] || die "sealed evidence has an invalid copied-input checksum"
+    [[ "$(sha256sum "$copied_path" | awk '{print $1}')" == "$copied_sha" ]] \
+      || die "copied verification input checksum changed: $copied_path"
+  done < <(jq -r \
+    --arg plan "$RUN_DIR/verification-plan.json" \
+    --arg fixture "$RUN_DIR/verification-fixture-manifest.json" \
+    --arg matrix "$RUN_DIR/verification-matrix-catalog.tsv" \
+    --arg adapter "$RUN_DIR/verification-adapter-catalog.tsv" \
+    --arg config "$RUN_DIR/verification-config-fingerprint.json" '
+      [[$plan,.bindings.plan_sha256],
+       [$fixture,.bindings.fixture_manifest_sha256],
+       [$matrix,.bindings.matrix_catalog_sha256],
+       [$adapter,.bindings.adapter_catalog_sha256],
+       [$config,.bindings.config_fingerprint_document_sha256]][] | @tsv
+    ' "$RUN_DIR/verification-release-evidence.json")
   record run_id "$RUN_ID"
   record created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   record expected_revision "$EXPECTED_REVISION"
+  record expected_digest "$EXPECTED_DIGEST"
   record previous_image_id "$CURRENT_IMAGE_ID"
   record previous_revision "$CURRENT_REVISION"
   record candidate_image_id "$CANDIDATE_IMAGE_ID"
   record candidate_revision "$CANDIDATE_REVISION"
+  record candidate_image_ref "$CANDIDATE_IMAGE_REF"
+  record candidate_repo_digests "$CANDIDATE_REPO_DIGESTS"
+  record promotion_run_id "$PROMOTION_RUN_ID"
+  record promotion_source_run_id "$promotion_source_run"
+  record evidence_source_run_id "$evidence_source_run"
+  record verification_evidence_sha256 "$VERIFICATION_EVIDENCE_SHA256"
+  record verification_evidence_source "$evidence_source"
+  record verification_evidence_file "$RUN_DIR/verification-release-evidence.json"
+  record promotion_verification_file "$RUN_DIR/promotion-verification.json"
+  record promotion_verification_sha256 "$(sha256sum "$RUN_DIR/promotion-verification.json" | awk '{print $1}')"
+  record running_upstream_base "$(jq -r '.running.upstream_base' <<<"$SOURCE_PLAN_JSON")"
+  record candidate_upstream_base "$(jq -r '.candidate.upstream_base' <<<"$SOURCE_PLAN_JSON")"
+  record running_version "$(jq -r '.running.version' <<<"$SOURCE_PLAN_JSON")"
+  record candidate_version "$(jq -r '.candidate.version' <<<"$SOURCE_PLAN_JSON")"
   record rollback_tag "$ROLLBACK_TAG"
   record status "backup_pending"
 }
@@ -321,6 +489,71 @@ assert_unchanged_before_rollout() {
   check_http_baseline
 }
 
+check_source_baseline() {
+  [[ -x "$PLAN_SCRIPT" ]] || die "source baseline gate is unavailable: $PLAN_SCRIPT"
+  [[ -d "$SOURCE_REPO/.git" ]] || die "source repository is unavailable: $SOURCE_REPO"
+  SOURCE_PLAN_JSON="$("$PLAN_SCRIPT" \
+    --repo "$SOURCE_REPO" \
+    --running-revision "$CURRENT_REVISION" \
+    --candidate-revision "$EXPECTED_REVISION" \
+    --upstream-ref upstream/main \
+    --json)" || die "candidate failed the source baseline and VERSION gate"
+  jq -e '.baseline_gate == "passed"' >/dev/null <<<"$SOURCE_PLAN_JSON" \
+    || die "candidate source baseline evidence is invalid"
+}
+
+verify_release_and_promotion() {
+  [[ -f "$RELEASE_EVIDENCE_SCRIPT" ]] || die "release evidence verifier is unavailable: $RELEASE_EVIDENCE_SCRIPT"
+  [[ -f "$PROMOTION_VERIFY_SCRIPT" ]] || die "promotion verifier is unavailable: $PROMOTION_VERIFY_SCRIPT"
+  RELEASE_EVIDENCE_JSON="$(bash "$RELEASE_EVIDENCE_SCRIPT" \
+    --evidence "$VERIFICATION_EVIDENCE" \
+    --expected-revision "$EXPECTED_REVISION" \
+    --expected-digest "$EXPECTED_DIGEST")" \
+    || die "sealed debug release evidence verification failed"
+  VERIFICATION_EVIDENCE_SHA256="$(jq -r '.sha256 // empty' <<<"$RELEASE_EVIDENCE_JSON")"
+  [[ "$VERIFICATION_EVIDENCE_SHA256" =~ ^[0-9a-f]{64}$ ]] \
+    || die "release evidence verifier returned no valid checksum"
+  [[ "$(jq -r '.rollback_image_safe // false' <<<"$RELEASE_EVIDENCE_JSON")" == "true" ]] \
+    || die "release evidence does not prove R0-8 image rollback compatibility"
+
+  PROMOTION_VERIFICATION_JSON="$(bash "$PROMOTION_VERIFY_SCRIPT" \
+    --expected-revision "$EXPECTED_REVISION" \
+    --expected-digest "$EXPECTED_DIGEST" \
+    --promotion-run-id "$PROMOTION_RUN_ID" \
+    --verification-evidence-sha256 "$VERIFICATION_EVIDENCE_SHA256" \
+    --pull)" || die "exact-digest promotion verification failed"
+  jq -e --arg revision "$EXPECTED_REVISION" --arg digest "$EXPECTED_DIGEST" \
+    --arg evidence "$VERIFICATION_EVIDENCE_SHA256" --arg run "$PROMOTION_RUN_ID" '
+      (.promotion.promotion_run_id|tostring)==$run
+      and .promotion.revision==$revision
+      and .promotion.source_digest==$digest
+      and .promotion.target_digest==$digest
+      and .promotion.verification_evidence_sha256==$evidence
+      and .image.pulled==true
+      and .image.revision==$revision
+      and .image.digest==$digest
+      and .image.ref_name=="debug"
+    ' >/dev/null <<<"$PROMOTION_VERIFICATION_JSON" \
+    || die "promotion verifier output is not bound to the sealed candidate"
+  local evidence_source_run promotion_source_run
+  evidence_source_run="$(jq -r '.source_run_id // empty | tostring' <<<"$RELEASE_EVIDENCE_JSON")"
+  promotion_source_run="$(jq -r '.promotion.source_run_id // empty | tostring' <<<"$PROMOTION_VERIFICATION_JSON")"
+  [[ "$evidence_source_run" =~ ^[0-9]+$ ]] \
+    || die "sealed release evidence has no valid R0-1 source workflow run"
+  [[ "$promotion_source_run" == "$evidence_source_run" ]] \
+    || die "promotion source run does not match the sealed R0-1 workflow run"
+}
+
+check_remote_candidate_heads() {
+  local refs mine_sha debug_sha
+  refs="$(git -C "$SOURCE_REPO" ls-remote --exit-code origin refs/heads/mine refs/heads/debug)" \
+    || die "could not read current origin/mine and origin/debug heads"
+  mine_sha="$(awk '$2=="refs/heads/mine" {print $1}' <<<"$refs")"
+  debug_sha="$(awk '$2=="refs/heads/debug" {print $1}' <<<"$refs")"
+  [[ "$mine_sha" == "$EXPECTED_REVISION" && "$debug_sha" == "$EXPECTED_REVISION" ]] \
+    || die "remote branch heads no longer match promoted revision: mine=${mine_sha:-missing} debug=${debug_sha:-missing}"
+}
+
 wait_for_application_health() {
   local deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
   local container
@@ -346,6 +579,8 @@ verify_candidate_runtime() {
   local running_container
   local running_image
   local running_revision
+  local running_ref_name
+  local running_repo_digests
   local router_ready_url
   running_container="$(compose ps -q sub2api)" || return 1
   [[ -n "$running_container" ]] || return 1
@@ -353,6 +588,10 @@ verify_candidate_runtime() {
   [[ "$running_image" == "$CANDIDATE_IMAGE_ID" ]] || return 1
   running_revision="$(image_label "$running_image" "org.opencontainers.image.revision")" || return 1
   [[ "$running_revision" == "$CANDIDATE_REVISION" ]] || return 1
+  running_ref_name="$(image_label "$running_image" "org.opencontainers.image.ref.name")" || return 1
+  [[ "$running_ref_name" == "debug" ]] || return 1
+  running_repo_digests="$(image_repo_digests_json "$running_image")" || return 1
+  repo_digests_match "$running_repo_digests" "$EXPECTED_DIGEST" || return 1
   router_ready_url="$(resolve_router_ready_url)" || return 1
   check_status_json "$APP_HEALTH_URL" "ok" || return 1
   check_status_json "$router_ready_url" "ready" || return 1
@@ -399,20 +638,27 @@ handle_candidate_failure() {
 
 pull_verified_candidate() {
   ROLLBACK_TAG="ghcr.io/wesperez/sub2api:rollback-$RUN_ID"
+  CANDIDATE_IMAGE_REF="$APP_IMAGE_REPOSITORY:mine-sha-${EXPECTED_REVISION}@${EXPECTED_DIGEST}"
   docker image inspect "$ROLLBACK_TAG" >/dev/null 2>&1 && die "rollback tag unexpectedly exists: $ROLLBACK_TAG"
   docker image tag "$CURRENT_IMAGE_ID" "$ROLLBACK_TAG"
-  info "pulling only the sub2api application image"
-  compose pull sub2api
-  CANDIDATE_IMAGE_ID="$(docker image inspect -f '{{.Id}}' "$APP_IMAGE")"
-  CANDIDATE_REVISION="$(image_label "$CANDIDATE_IMAGE_ID" "org.opencontainers.image.revision")"
+  info "binding the promotion-verified candidate image: $CANDIDATE_IMAGE_REF"
+  CANDIDATE_IMAGE_ID="$(docker image inspect -f '{{.Id}}' "$CANDIDATE_IMAGE_REF")"
+  CANDIDATE_REVISION="$(image_label "$CANDIDATE_IMAGE_REF" "org.opencontainers.image.revision")"
+  CANDIDATE_REPO_DIGESTS="$(image_repo_digests_json "$CANDIDATE_IMAGE_REF")"
+
+  [[ "$(image_label "$CANDIDATE_IMAGE_REF" "org.opencontainers.image.ref.name")" == "debug" ]] \
+    || die "promoted candidate content identity is not labeled debug"
+  [[ "$CANDIDATE_REVISION" == "$EXPECTED_REVISION" ]] || die "pulled revision $CANDIDATE_REVISION does not match verified revision $EXPECTED_REVISION"
+  repo_digests_match "$CANDIDATE_REPO_DIGESTS" "$EXPECTED_DIGEST" \
+    || die "candidate repository digest does not match $EXPECTED_DIGEST"
 
   if [[ "$CANDIDATE_IMAGE_ID" == "$CURRENT_IMAGE_ID" ]]; then
+    docker image tag "$CANDIDATE_IMAGE_ID" "$APP_IMAGE"
+    [[ "$(docker image inspect -f '{{.Id}}' "$APP_IMAGE")" == "$CURRENT_IMAGE_ID" ]] || die "could not bind the local mine tag to the running image"
     release_rollback_tag
     info "no newer application image is available; production was not restarted"
     exit 0
   fi
-  [[ "$(image_label "$CANDIDATE_IMAGE_ID" "org.opencontainers.image.ref.name")" == "mine" ]] || die "pulled image is not labeled mine"
-  [[ "$CANDIDATE_REVISION" == "$EXPECTED_REVISION" ]] || die "pulled revision $CANDIDATE_REVISION does not match verified revision $EXPECTED_REVISION"
 }
 
 parse_args() {
@@ -427,6 +673,21 @@ parse_args() {
       --expected-revision)
         (( $# >= 2 )) || die "--expected-revision requires a value"
         EXPECTED_REVISION="$2"
+        shift
+        ;;
+      --expected-digest)
+        (( $# >= 2 )) || die "--expected-digest requires a value"
+        EXPECTED_DIGEST="$2"
+        shift
+        ;;
+      --promotion-run-id)
+        (( $# >= 2 )) || die "--promotion-run-id requires a value"
+        PROMOTION_RUN_ID="$2"
+        shift
+        ;;
+      --verification-evidence)
+        (( $# >= 2 )) || die "--verification-evidence requires a value"
+        VERIFICATION_EVIDENCE="$2"
         shift
         ;;
       --rollback-image-safe)
@@ -444,6 +705,10 @@ parse_args() {
   done
   if [[ "$MODE" == "apply" ]]; then
     [[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || die "apply mode requires a lowercase 40-character Git SHA"
+    [[ "$EXPECTED_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || die "apply mode requires a sha256 image digest"
+    [[ "$PROMOTION_RUN_ID" =~ ^[0-9]+$ ]] || die "apply mode requires --promotion-run-id with digits only"
+    [[ -n "$VERIFICATION_EVIDENCE" && "$VERIFICATION_EVIDENCE" != *$'\n'* && "$VERIFICATION_EVIDENCE" != *$'\r'* ]] \
+      || die "apply mode requires a safe --verification-evidence path"
     (( ROLLBACK_IMAGE_SAFE == 1 )) || die "apply mode requires an explicit proof of image rollback safety"
   fi
 }
@@ -451,12 +716,16 @@ parse_args() {
 main() {
   parse_args "$@"
   if [[ "$MODE" == "apply" ]]; then
+    require_command git
     acquire_apply_lock
   fi
   run_preflight
   [[ "$MODE" == "apply" ]] || exit 0
+  check_source_baseline
 
   RUN_ID="upgrade-$(date -u +%Y%m%dT%H%M%SZ)-${EXPECTED_REVISION:0:12}"
+  verify_release_and_promotion
+  check_remote_candidate_heads
   pull_verified_candidate
   create_run
   create_database_dump
@@ -466,16 +735,21 @@ main() {
   ROLLOUT_STARTED=1
 
   info "replacing only the sub2api application container"
-  if ! compose up -d --no-deps --force-recreate sub2api; then
+  if ! compose_with_image "$CANDIDATE_IMAGE_REF" up -d --no-deps --force-recreate sub2api; then
     handle_candidate_failure
   fi
   if ! verify_candidate_runtime; then
     handle_candidate_failure
   fi
 
+  SUCCESS_COMMIT_STARTED=1
+  if ! docker image tag "$CANDIDATE_IMAGE_ID" "$APP_IMAGE" \
+    || [[ "$(docker image inspect -f '{{.Id}}' "$APP_IMAGE")" != "$CANDIDATE_IMAGE_ID" ]] \
+    || ! record passed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    || ! record status "passed_pending_finalization"; then
+    handle_candidate_failure
+  fi
   ROLLOUT_COMPLETE=1
-  record status "passed_pending_finalization"
-  record passed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   info "rollout succeeded"
   printf 'run_id=%s\nrun_dir=%s\nprevious_revision=%s\ncandidate_revision=%s\n' \
     "$RUN_ID" "$RUN_DIR" "$CURRENT_REVISION" "$CANDIDATE_REVISION"

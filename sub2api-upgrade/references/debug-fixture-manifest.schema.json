@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "debug-fixture-manifest.schema.json",
+  "title": "Sub2API Debug Fixture Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "synthetic_only",
+    "oauth_refresh_owner",
+    "fixture_version",
+    "last_verified_schema",
+    "objects",
+    "maps",
+    "balances"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "synthetic_only": {
+      "type": "boolean",
+      "const": true
+    },
+    "oauth_refresh_owner": {
+      "type": "string",
+      "const": "debug-only"
+    },
+    "fixture_version": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "last_verified_schema": {
+      "type": "string",
+      "minLength": 1
+    },
+    "notes": {
+      "type": "string"
+    },
+    "objects": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "stable_label",
+          "field_set",
+          "field_set_hash"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "user",
+              "api_key",
+              "account",
+              "group",
+              "setting",
+              "pricing",
+              "other"
+            ]
+          },
+          "stable_label": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$"
+          },
+          "field_set": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_.-]+$"
+            },
+            "uniqueItems": true
+          },
+          "field_set_hash": {
+            "type": "string",
+            "description": "SHA-256 of UTF-8 compact JSON for the lexicographically sorted field_set, followed by one LF byte.",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "maps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "header_overrides",
+        "proxy",
+        "model_mapping"
+      ],
+      "properties": {
+        "header_overrides": {
+          "$ref": "#/$defs/mapDescriptor"
+        },
+        "proxy": {
+          "$ref": "#/$defs/mapDescriptor"
+        },
+        "model_mapping": {
+          "$ref": "#/$defs/mapDescriptor"
+        }
+      }
+    },
+    "balances": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stable_label",
+          "min",
+          "max"
+        ],
+        "properties": {
+          "stable_label": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$"
+          },
+          "min": {
+            "type": "number"
+          },
+          "max": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "config_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "$defs": {
+    "mapDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field_set",
+        "field_set_hash"
+      ],
+      "properties": {
+        "field_set": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_.-]+$"
+          },
+          "uniqueItems": true
+        },
+        "field_set_hash": {
+          "type": "string",
+          "description": "SHA-256 of UTF-8 compact JSON for the lexicographically sorted field_set, followed by one LF byte.",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}

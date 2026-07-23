@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+IFS=$'\n\t'
+umask 077
+TESTS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+SCRIPTS_DIR="$(cd -- "$TESTS_DIR/.." && pwd -P)"
+
+echo "== bash -n =="
+bash -n "$SCRIPTS_DIR/plan-sub2api-upgrade.sh"
+bash -n "$SCRIPTS_DIR/wait-branch-image.sh"
+bash -n "$SCRIPTS_DIR/check-debug-isolation.sh"
+bash -n "$SCRIPTS_DIR/compute-debug-config-fingerprint.sh"
+bash -n "$SCRIPTS_DIR/check-debug-fixture-manifest.sh"
+bash -n "$SCRIPTS_DIR/snapshot-debug-postgres.sh"
+bash -n "$SCRIPTS_DIR/run-debug-matrix.sh"
+bash -n "$SCRIPTS_DIR/run-debug-adapter.sh"
+bash -n "$SCRIPTS_DIR"/debug-canary-adapters/*.sh
+bash -n "$SCRIPTS_DIR/verify-release-evidence.sh"
+bash -n "$SCRIPTS_DIR/verify-promoted-image.sh"
+bash -n "$SCRIPTS_DIR/update-sub2api.sh"
+bash -n "$SCRIPTS_DIR/finalize-sub2api-upgrade.sh"
+bash -n "$TESTS_DIR/test-check-debug-fixture-manifest.sh"
+bash -n "$TESTS_DIR/test-snapshot-debug-postgres.sh"
+bash -n "$TESTS_DIR/test-run-debug-matrix.sh"
+bash -n "$TESTS_DIR/test-run-debug-adapter.sh"
+bash -n "$TESTS_DIR/verify-promoted-image-test.sh"
+bash -n "$TESTS_DIR/wait-branch-image-test.sh"
+bash -n "$TESTS_DIR/update-evidence-contract-test.sh"
+bash -n "$TESTS_DIR/finalize-evidence-contract-test.sh"
+bash -n "$TESTS_DIR/test-plan-sub2api-upgrade.sh"
+
+echo "== unit tests =="
+bash "$TESTS_DIR/test-check-debug-fixture-manifest.sh"
+bash "$TESTS_DIR/test-snapshot-debug-postgres.sh"
+bash "$TESTS_DIR/test-run-debug-matrix.sh"
+bash "$TESTS_DIR/test-run-debug-adapter.sh"
+bash "$TESTS_DIR/verify-promoted-image-test.sh"
+bash "$TESTS_DIR/wait-branch-image-test.sh"
+bash "$TESTS_DIR/update-evidence-contract-test.sh"
+bash "$TESTS_DIR/finalize-evidence-contract-test.sh"
+bash "$TESTS_DIR/test-plan-sub2api-upgrade.sh"
+echo "ALL_OK"
