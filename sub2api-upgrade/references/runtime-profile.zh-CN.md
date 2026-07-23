@@ -22,4 +22,6 @@
 
 不读取、打印或复制 `.env` 中的密码、JWT、TOTP key、管理 key 或账号凭据。升级 run 可以把 `.env` 的权限受限快照与数据库 dump 一同保留作回滚证据，但不能在聊天、日志或参考文件中输出其内容。
 
-旧分支镜像 workflow 对 `debug`、`mine` 各跑一轮完整 CI/build，近期成功 run 每轮约 11 分 36 秒到 12 分 24 秒。优化后的首次真实 debug run `29999790284` attempt 1 墙钟 8 分 56 秒：unit/integration 8 分 13 秒、并行 cache-only Docker build 4 分 07 秒、verify-gated publish 33 秒；同 SHA attempt 2 热跑墙钟 8 分 24 秒，Docker build 14 秒、publish recovery 29 秒、unit/integration 7 分 46 秒。当前长尾已明确是不可跳过的 Go 测试，而不是 Docker；mine 改用 exact digest promotion 后不再重复整轮 CI/build。上述是一次冷/热样本，不作为固定 SLA。生产 dump 与应用切换近期约 17–21 秒，不能通过跳过验证转移风险。
+旧分支镜像 workflow 对 `debug`、`mine` 各跑一轮完整 CI/build，近期成功 run 每轮约 11 分 36 秒到 12 分 24 秒。第一阶段优化的真实 debug run `29999790284` attempt 1 墙钟 8 分 56 秒：串行 unit/integration job 8 分 13 秒、并行 cache-only Docker build 4 分 07 秒、verify-gated publish 33 秒；同 SHA attempt 2 热跑墙钟 8 分 24 秒，Docker build 14 秒、publish recovery 29 秒、串行 unit/integration 7 分 46 秒。
+
+最终候选 run `30001779447` 把原命令不变的 unit 与 integration 拆为两个必过并行 job，push 到 workflow 完成约 6 分 31 秒：unit job 5 分 19 秒（测试 step 5 分 11 秒）、integration job 4 分 06 秒（测试 step 3 分 56 秒）、cache-only build job 34 秒（build step 11 秒）、首次 publish 55 秒。integration 比串行 step 更慢，这与失去同 runner 的 unit 编译热身以及跨 run 冷启动、网络和 Testcontainers 波动一致，但仍被 unit 关键路径覆盖；总墙钟较第一阶段冷跑再省约 2 分 25 秒。当前长尾是不可跳过的 unit 测试；mine 改用 exact digest promotion 后不再重复整轮 CI/build。以上均为少量样本，不是固定 SLA，且并行会略增 runner 分钟。生产 dump 与应用切换近期约 17–21 秒，不能通过跳过验证转移风险。

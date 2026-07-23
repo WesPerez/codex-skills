@@ -9,7 +9,7 @@
 - 每次重建 debug 端口、TOTP、余额、账号配置和测试场景；
 - fixture 假失败、版本基线倒退或漏测后再花数小时审计。
 
-优化后的正常小版本升级以减少一轮 mine 构建、人工逐例和 fixture 重建为目标。2026-07-23 首个真实 run `29999790284` 已验证：冷跑 8 分 56 秒、同 SHA 热跑 8 分 24 秒，旧成功 run 为 11 分 36 秒到 12 分 24 秒；cache-only Docker build 从 4 分 07 秒降到 14 秒，且始终与 CI 并行，publish 为 33/29 秒。当前关键路径是 7 分 46 秒到 8 分 13 秒的 Go unit/integration；这些只是首轮样本，不承诺固定分钟数。时间目标只能由阶段打点更新，不能作为绕过门禁的 SLA。迁移、上游大改或真实回归必须以正确性为先。
+优化后的正常小版本升级以减少一轮 mine 构建、人工逐例和 fixture 重建为目标。2026-07-23 第一阶段真实 run `29999790284` 已验证：冷跑 8 分 56 秒、同 SHA 热跑 8 分 24 秒，旧成功 run 为 11 分 36 秒到 12 分 24 秒；cache-only Docker build 从 4 分 07 秒降到 14 秒，且始终与 CI 并行，publish 为 33/29 秒。最终候选 run `30001779447` 再把原命令不变的 unit 与 integration 拆成两个必过并行 job，push 到 workflow 完成约 6 分 31 秒；unit/integration job 分别为 5 分 19 秒和 4 分 06 秒，首次 publish 55 秒。当前关键路径是约 5 分钟的 unit，而不是 Docker 或 integration；这些只是少量样本，不承诺固定分钟数。时间目标只能由阶段打点更新，不能作为绕过门禁的 SLA。迁移、上游大改或真实回归必须以正确性为先。
 
 ## 证据生命周期
 
@@ -89,7 +89,9 @@
 
 ### E. 同 SHA 推进
 
-`docker-branch.yml` 只构建 debug：full CI 与无 registry 权限的 cache-only build 并行；只有两者都成功，publish 才生成 `debug-sha-<40>`。失败候选只能写自己的 SHA cache；不可变镜像的 SLSA provenance 通过后，才把候选 layer cache 推进为 trusted cache。正式镜像启用 max provenance。
+`docker-branch.yml` 只构建 debug：full CI 与无 registry 权限的 cache-only build 并行；full CI 内 `make test-unit` 与 `make test-integration` 保持原覆盖口径，作为两个无依赖且都必过的 job 并行。只有全部 CI 与 build 成功，publish 才生成 `debug-sha-<40>`。失败候选只能写自己的 SHA cache；不可变镜像的 SLSA provenance 通过后，才把候选 layer cache 推进为 trusted cache。正式镜像启用 max provenance。
+
+并行只允许停在完整 unit/integration job 边界。`internal/repository` integration 由包级 `TestMain` 共享一组 PostgreSQL/Redis testcontainers，且部分用例会执行 `TRUNCATE` 或真实写入；禁止再按文件/子集并行分片，也禁止在未改成独立数据库或强事务隔离前加入 `t.Parallel()`。大量无 build tag 测试会按现有 Go 语义在两条命令中重复执行，这是已知覆盖成本，不能为省时直接删掉一侧。
 
 最终 debug 矩阵 sealed 后，`Promote Debug Image` 从 exact `debug-sha-<40>@digest` carbon-copy `mine-sha-<40>`、`mine-<12>`、`mine`，不重建、不改 labels。source/target digest 必须相同，所以 `ref.name=debug` 是正确的内容身份；mine 发布资格来自 source run artifact、promotion receipt 和 sealed evidence hash。生产 apply 必须重新读取本地 evidence 文件，不能只信 receipt 中的字符串。
 

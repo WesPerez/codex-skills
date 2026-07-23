@@ -19,7 +19,7 @@
 当前行为：
 
 - `main` 只镜像上游；`debug`、`mine` 发布固定分支镜像；服务器禁止本地构建。
-- debug full CI 与 cache-only Docker build 并行；两者全绿后发布不可变 `debug-sha-<40>` 和兼容 tag，并写 OCI revision/ref label 与 source-run metadata artifact。
+- debug full CI 与 cache-only Docker build 并行；full CI 内原有 unit/integration 命令作为两个必过 job 并行；全部全绿后发布不可变 `debug-sha-<40>` 和兼容 tag，并写 OCI revision/ref label 与 source-run metadata artifact。
 - mine 不重复构建；只由 `Promote Debug Image` 将已验证 exact digest carbon-copy 到 mine tags，并由 sealed evidence + promotion receipt 授权生产。
 - debug matrix 将 adapter catalog、fixture/config 指纹与最终 SHA/digest 一起绑定；`run-ready` 串行执行已审计 adapter 并取 UTC 日志窗，未实现的协议场景明确要求结构化人工证明，不能显示为自动通过。
 - debug 与生产使用独立 Compose、数据、端口和 Watchtower 策略；生产只由受控脚本切换应用。

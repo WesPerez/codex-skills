@@ -22,6 +22,7 @@
 | 2026-07-20/21，同一事故审计 | 候选从旧 `0.1.160` 分支构建并 force 到 `mine`，覆盖了运行中的 `0.1.161` 基线；代码修复本身不能证明没有版本倒退。 | 推 debug/mine 前自动比较生产与候选的 upstream merge-base 和 `VERSION`；候选基线较旧直接停止。语义重建可不保留旧 mine 祖先，但不得丢更晚 upstream。 |
 | 2026-07-20/21，Router 与 Sub2 双层重试 | 两层各自重试/回退会放大请求次数、等待和错误噪声，单看其中一层日志容易误判。 | 调度、池或错误策略变更时同时核对 Sub2 与 Router 审计；明确唯一重试 owner、总预算和首包后禁止换流。 |
 | 2026-07-21，Actions 与升级 run 计时 | 当前 full CI + 镜像约 11–12 分钟，debug/mine 同一 SHA 各跑一次；生产 dump+应用切换约 17–21 秒。 | 优化 CI 等待、一次成型和未来同 SHA promotion，不削减生产 dump、debug 矩阵或 revision 门禁。 |
+| 2026-07-23，runs `29999790284`、`30001779447` | unit 与 integration 在同 job 串行时占 7 分 46 秒到 8 分 13 秒；保持两条命令不变并拆为独立必过 job 后，首次完整 debug workflow 约 6 分 31 秒。integration step 从 2 分 47 秒升到 3 分 56 秒，可能与失去 unit 的本地编译热身以及跨 run 冷启动、网络和 Testcontainers 波动有关，但仍被 5 分 11 秒的 unit 关键路径覆盖。 | 只在完整 unit/integration job 边界并行，并用 workflow contract 锁定两条命令、Go 版本和 cache；不按文件分片共享 PostgreSQL/Redis 的 repository integration，不用削减覆盖换速度。 |
 | 2026-07-21/22，session `019f8005...` 清理复盘 | 旧分支、早期镜像和备份被清得过深，部分职责提交只剩 dangling object，无法证明能力已完整承接。 | 未完成职责替代证明和两个 recovery run 保留前，不删旧 refs/镜像/dump，不运行即时 Git GC。 |
 | 2026-07-16/17，`redis-aof-corrupt-*` 恢复资产与 session `019f6dec...` | 主机异常后 Redis AOF 尾部损坏导致 Redis 循环重启，Sub2API 继而 503。 | 应用升级不 `down`、不 pull/recreate Redis；前后检查 Redis、应用、Router 和 Nginx 完整链路。 |
 | 运行态与旧文档 | Watchtower 文档曾称自动更新，实际已对 `sub2api-prod` disable，手工全量 pull 仍可能拉动浮动 PG/Redis image。 | 每次 inspect Watchtower；仅 `docker compose pull sub2api`，绝不全量 pull。 |
