@@ -45,3 +45,8 @@
 
 !/sub2api-k12-space-audit/
 !/sub2api-k12-space-audit/**
+
+!/stabilize-v2ray-443/
+!/stabilize-v2ray-443/**
+stabilize-v2ray-443/**/__pycache__/
+stabilize-v2ray-443/**/*.pyc

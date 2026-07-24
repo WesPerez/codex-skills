@@ -1,0 +1,4 @@
+interface:
+  display_name: "V2Ray 443 稳定性修复"
+  short_description: "诊断并修复 Nginx TLS/WS 443 代理的间歇断网与限流故障"
+  default_prompt: "使用 $stabilize-v2ray-443 诊断并修复经 Nginx TLS/WS 暴露在 443 的 V2Ray/Xray 代理间歇断网、503 与连接风暴，并完成回滚和持续验证。"
