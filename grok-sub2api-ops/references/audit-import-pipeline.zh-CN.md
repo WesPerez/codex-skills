@@ -74,6 +74,8 @@ BRIDGE_PORT
 
 分组 Responses 可验证整体入口，但不能替代逐账号 test。一次失败不足以证明账号不可用，尤其不能把 402/429 当坏号。
 
+当审计已经得到一组决定性的 `revoked`，且任务要求“无材料删除、有材料 remint”时，冻结该快照后转到 [revoked-recovery-fast-path.zh-CN.md](revoked-recovery-fast-path.zh-CN.md) 和 `scripts/reconcile_revoked.py`。不要继续重复全量 test，也不要随着 usage 导致的 status 抖动重新生成候选。
+
 ## 补齐与导入
 
 1. 候选 auth 先通过客户端或服务器 `/responses` preprobe。

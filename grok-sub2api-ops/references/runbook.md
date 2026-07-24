@@ -49,6 +49,8 @@
 
 ## OAuth 恢复
 
+批量 revoked、账号突然减少或“删除一组并恢复另一组”时，直接使用 [revoked-recovery-fast-path.zh-CN.md](revoked-recovery-fast-path.zh-CN.md) 和正式 `scripts/reconcile_revoked.py`，不要在现场重写处置脚本。
+
 下列证据表示 refresh 已失效：
 
 ```text
@@ -64,6 +66,15 @@ GROK_OAUTH_TOKEN_REFRESH_FAILED
 3. 更新原 Sub2API 账号，不创建重复账号；执行指定账号 test 后再恢复调度。
 4. 无密码但邮箱可收信时走密码恢复；无任何恢复能力时才列为逐 ID 删除候选。
 5. 旧 auth 或数据库备份不能替代重新登录，但数据库备份必须保留到恢复完成。
+
+关键防错：
+
+- `recover_batch_oauth.py` 面向“从未生成 auth”的批次；已有 revoked auth 会被跳过。
+- remint 后不要使用 `register_and_import.py --resume`，access-token hash 已改变时可能新建重复账号。
+- 显示名可能被排序前缀修改；按唯一 email/sub 锁定原账号并保留原显示名，歧义即停。
+- bridge 候选隔离后先清旧 revoked error，再运行语义 postprobe；通过或明确 402/429 后 helper 立即重新隔离，全部 remint 完成后复用该证据逐号 promote，不重复 Test Connection。
+- 最终官方 Codex `grok-4.5` 烟测使用 `high` effort，并核对 Grok provider/group/account HTTP 200，无 fallback。
+- 若日志为多次 refresh timeout、临时隔离、下一周期 permanent/revoked，标记 `ambiguous_refresh_rotation`：可能是上游已轮换而响应/持久化丢失，但没有 token-version/request ID 对照时不能写成确定根因。
 
 ## 账号状态
 

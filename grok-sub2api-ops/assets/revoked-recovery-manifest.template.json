@@ -1,0 +1,38 @@
+{
+  "schema_version": 2,
+  "batch_id": "audit-recover-YYYYMMDDTHHMMSSZ",
+  "operation": "delete-revoked-and-remint-proven-grok-oauth",
+  "status": "planned",
+  "environment": {
+    "name": "production",
+    "target_group": {
+      "id": 0,
+      "name": "grok",
+      "platform": "grok"
+    }
+  },
+  "source_audit": {
+    "path": "private/runs/<audit-batch>/import/account-audit-sanitized.json",
+    "sha256": ""
+  },
+  "backup": {
+    "path": "",
+    "sha256": "",
+    "bytes": 0,
+    "format": "postgres-custom",
+    "pg_restore_list_verified": false,
+    "retention_status": "pending"
+  },
+  "proxy_health": {
+    "path": "",
+    "healthy_refs": []
+  },
+  "delete": {
+    "candidate_ids": []
+  },
+  "recover": {
+    "canary_id": 0,
+    "candidate_ids": [],
+    "material": {}
+  }
+}
