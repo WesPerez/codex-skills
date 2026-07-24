@@ -11,6 +11,8 @@
 
 优化后的正常小版本升级以减少一轮 mine 构建、人工逐例和 fixture 重建为目标。2026-07-23 第一阶段真实 run `29999790284` 已验证：冷跑 8 分 56 秒、同 SHA 热跑 8 分 24 秒，旧成功 run 为 11 分 36 秒到 12 分 24 秒；cache-only Docker build 从 4 分 07 秒降到 14 秒，且始终与 CI 并行，publish 为 33/29 秒。最终候选 run `30001779447` 再把原命令不变的 unit 与 integration 拆成两个必过并行 job，push 到 workflow 完成约 6 分 31 秒；unit/integration job 分别为 5 分 19 秒和 4 分 06 秒，首次 publish 55 秒。当前关键路径是约 5 分钟的 unit，而不是 Docker 或 integration；这些只是少量样本，不承诺固定分钟数。时间目标只能由阶段打点更新，不能作为绕过门禁的 SLA。迁移、上游大改或真实回归必须以正确性为先。
 
+2026-07-24 的 `0.1.164` 发布按实际 diff 与生产活跃能力选择 34/44 个 case，最终 34/34 通过；未启用或未触发的 10 例留在 catalog 而不执行。exact digest promotion 用 31 秒，生产阶段含约 47 MB dump 与应用切换约 45 秒。该结果证明提速点是精确选例、同 SHA promotion 和保留 debug 骨架，不是把全 catalog 改成另一个固定 case 数。
+
 ## 证据生命周期
 
 ### 可跨升级复用
@@ -97,6 +99,8 @@
 并行只允许停在完整 unit/integration job 边界。`internal/repository` integration 由包级 `TestMain` 共享一组 PostgreSQL/Redis testcontainers，且部分用例会执行 `TRUNCATE` 或真实写入；禁止再按文件/子集并行分片，也禁止在未改成独立数据库或强事务隔离前加入 `t.Parallel()`。大量无 build tag 测试会按现有 Go 语义在两条命令中重复执行，这是已知覆盖成本，不能为省时直接删掉一侧。
 
 最终 debug 矩阵 sealed 后，`Promote Debug Image` 从 exact `debug-sha-<40>@digest` carbon-copy `mine-sha-<40>`、`mine-<12>`、`mine`，不重建、不改 labels。source/target digest 必须相同，所以 `ref.name=debug` 是正确的内容身份；mine 发布资格来自 source run artifact、promotion receipt 和 sealed evidence hash。生产 apply 必须重新读取本地 evidence 文件，不能只信 receipt 中的字符串。
+
+新生产 run 通过后先保持 `passed_pending_finalization` 和 rollback image tag。立即完成 debug stop、证据落盘和实时复核，但不要用 `--min-age-minutes 0` 绕过稳定窗口；达到既定最小年龄后再按 `finalize-sub2api-upgrade.sh --list`、目标 run dry-run、`--apply` 的顺序释放 rollback tag。数据库 dump、配置快照和至少两个 recovery run 始终保留。
 
 不可变 `debug-sha-<40>` 已存在时绝不覆盖。只有 BuildKit SLSA provenance、OCI index、attestation manifest 和 in-toto statement 的 subject/predicate/blob digest 共同证明内容来自本仓库 `Docker Branch Images` 的 debug/publish job、同一完整 SHA，才允许补发 metadata；这是结构化内容绑定，不宣称独立的 Sigstore 签名验证。artifact 同时记录原 publisher run 与本次成功验证 run，labels 单独不构成恢复依据。
 
