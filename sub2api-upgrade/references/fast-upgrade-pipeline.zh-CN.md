@@ -54,6 +54,7 @@
 - 生成本次矩阵、预期负例和日志时间窗模板；
 - 核对合成 fixture manifest、专属 canary 目录和 debug 快照位置；
 - 运行只读生产 preflight，记录当前 revision/health/Watchtower；
+- 用最小只读汇总生成仅含 provider/feature 名称的 active inventory，不保存账号、凭据或业务明细；
 - 准备最终报告的职责表和回滚判定表。
 
 不要并行执行会争用同一 canary 账号、更新相同 fixture map、触发相同一次性 OAuth refresh 或共享日志断言的场景。
@@ -78,14 +79,14 @@
 
 ### D. 两阶段复测
 
-- **开发循环**：`R0 + 当前失败/受影响套件 + 日志窗`，缩短定位周期。
-- **发布门禁**：最终 SHA 的 `R0 + 所有触发 R1/R2 + 所有个性化职责套件 + 回滚演练 + 日志窗`。
+- **开发循环**：`R0 + 当前失败/受影响 case + 日志窗`，缩短定位周期。
+- **发布门禁**：最终 SHA 的 `R0 + U/M diff 精确触发 case + 生产活跃能力 canary + 职责兜底 + 回滚演练 + 日志窗`。未启用能力留在 catalog，不为凑全场景执行。
 
 使用 `run-debug-matrix.sh` 管理 attempt：失败或 blocked 后只有显式 `--new-attempt` 才能复测；running attempt 只能续接。release mode 的 passed case 必须带证据，R0-7/log executor 必须带日志窗，skip 必须说明原因。任何 commit 变化都必须重跑发布门禁。最终只接受 `seal` 生成且经 `verify-release-evidence.sh` 复核的 `release-evidence.json`。
 
 用 `run-debug-adapter.sh run-ready` 代替逐条启动 runner。它对固定 debug 环境加跨 run 全局锁、按 plan 串行、把 R0-7 放到最后，并从 matrix state 恢复 running/pending case；不会并发争用账号、fixture 或日志。adapter catalog 在 matrix init 时复制并绑定 hash；runner 不接收命令、URL、Compose 目录或服务名。每个 attempt 记录 `prepared -> executing -> adapter_done -> logs_done -> finished` checkpoint；`no_replay` 中断后 blocked，不自动重复生成或计费。
 
-当前自动化状态必须如实报告：44 个场景是完整发布清单，但只有 R0-1（身份）、R0-2（候选启动/健康/运行绑定）和 R0-7（致命日志模式扫描）已有自动 adapter；其余 39 个普通场景使用 `manual-verification`，R0-8/R1-M3 使用结构化回退证明。`run-ready` 返回 78 代表仍有人工门禁，不是成功。新增协议 adapter 前必须先有固定 debug fixture、确定性断言、no-replay 策略和测试；catalog 只有在脚本经过真实 debug 审计后才改回自动。
+当前自动化状态必须如实报告：catalog 有 44 个可选场景，planner 默认只纳入 R0 与实际触发 case；只有 R0-1（身份）、R0-2（候选启动/健康/运行绑定）和 R0-7（致命日志模式扫描）已有自动 adapter。其余被选普通场景使用 `manual-verification`，被选的 R0-8/R1-M3 使用结构化回退证明。`run-ready` 返回 78 代表仍有人工门禁，不是成功。新增协议 adapter 前必须先有固定 debug fixture、确定性断言、no-replay 策略和测试；catalog 只有在脚本经过真实 debug 审计后才改回自动。
 
 ### E. 同 SHA 推进
 

@@ -3,14 +3,14 @@
 ## 使用方法
 
 1. `R0` 永远全跑。
-2. 用 `plan-sub2api-upgrade.sh` 根据“当前生产 -> 候选”升级 diff 和“候选 upstream base -> 候选”个性化 diff 选择套件。
-3. 人工补上动态配置、账号 extra、Router、Nginx、定时任务和间接调用路径触发的套件。
-4. 开发循环可以只重跑 `R0 + 受影响套件`；最终 SHA 必须跑所有选中套件。
+2. 用 `plan-sub2api-upgrade.sh` 分别分析“旧 upstream base -> 新 upstream base”“旧 upstream base -> 运行中 MINE”“新 upstream base -> 候选 MINE”，按精确路径规则选到 case；生产总 diff 和纯测试文件只作审计，不独立触发运行时 case。
+3. 先以生产最小只读汇总生成脱敏 active inventory，再启用当前真实在用 provider/feature 的 live canary；未启用、无账号或近期无调用的能力不因 catalog 存在而阻断。人工补上动态配置、账号 extra、Router、Nginx、定时任务和间接调用路径。
+4. 开发循环可以只重跑 `R0 + 受影响 case`；最终 SHA 必须跑所有选中 case。同一请求可同时支撑多个 case，但每个 case 的断言和证据引用必须明确。
 5. 每例记录：`case_id`、SHA、image digest、配置/fixture 指纹、UTC 起止、执行器、请求类别、预期、实际、日志窗、状态、证据路径。
 
 用 `run-debug-matrix.sh` 固化记录：running attempt 可续接；failed/blocked 后必须显式新 attempt。开发循环用 `mode=dev`；最终 SHA 用 `mode=release`，每个 passed case 必须提供证据文件，R0-7/log executor 必须提供任务归属的 debug 日志窗，skip 必须有原因。只有 `seal` 生成且经 `verify-release-evidence.sh` 复核的 `release-evidence.json` 可进入 promotion 和生产 apply。
 
-先用 `run-debug-adapter.sh run-ready` 串行处理全部可执行项；R0-7 始终最后运行，跨 run 也禁止并发争用同一 debug Compose/fixture。当前仅 R0-1、R0-2、R0-7 有自动 adapter；其他场景在 case 脚本完成真实审计前保持 manual。自动 passed 必须绑定同 run/case/attempt 的 adapter checkpoint、evidence/log hash；manual passed 必须使用 `kind=manual-verification` 的结构化 JSON。runner 不接受任意命令、URL、日志路径或服务名，不确定的真实请求禁止自动重放。
+先用 `run-debug-adapter.sh run-ready` 串行处理全部可执行项；R0-7 始终最后运行，跨 run 也禁止并发争用同一 debug Compose/fixture。catalog 有 44 个可选场景，但计划默认只选 R0 与实际触发项；当前仅 R0-1、R0-2、R0-7 有自动 adapter，其他被选场景在 case 脚本完成真实审计前保持 manual。自动 passed 必须绑定同 run/case/attempt 的 adapter checkpoint、evidence/log hash；manual passed 必须使用 `kind=manual-verification` 的结构化 JSON。runner 不接受任意命令、URL、日志路径或服务名，不确定的真实请求禁止自动重放。
 
 release 模式中三类证据有机器契约：R0-1 必须是 `candidate-identity`，并把真实 workflow run 写入 sealed `source_run_id`；R0-8/R1-M3 必须是 `rollback-compatibility`；其余 manual case 必须是 `manual-verification`，绑定 case、attempt、revision、digest、debug target、verifier、procedure 和全部通过的 assertions。自动 evidence 还必须来自同 attempt 的 adapter checkpoint。空文件、普通文字、模板占位或手写自动证据不能 seal。
 
