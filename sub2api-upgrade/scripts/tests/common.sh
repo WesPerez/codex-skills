@@ -85,11 +85,12 @@ plant_adapter_checkpoint() {
   attempt_dir="$run_dir/cases/$case_id/attempt-$(printf '%03d' "$attempt")"
   mkdir -p "$attempt_dir"
   evidence_sha="$(sha256sum -- "$evidence_file" | awk '{print $1}')"
-  now="2026-07-23T00:00:00Z"
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   if [[ -n "$log_file" ]]; then
     local log_sha
     log_sha="$(sha256sum -- "$log_file" | awk '{print $1}')"
-    log_json="$(jq -n --arg sha "$log_sha" '{collected:true,scope:"project",since:"2026-07-23T00:00:00Z",until:"2026-07-23T00:00:01Z",path:"log-window.raw",sha256:$sha,compose_file:"/tmp/compose.yml",raw_printed:false}')"
+    log_json="$(jq -n --arg sha "$log_sha" --arg now "$now" \
+      '{collected:true,scope:"project",since:$now,until:$now,path:"log-window.raw",sha256:$sha,compose_file:"/tmp/compose.yml",raw_printed:false}')"
   else
     log_json='null'
   fi

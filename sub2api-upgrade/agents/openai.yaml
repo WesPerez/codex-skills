@@ -1,4 +1,4 @@
 interface:
-  display_name: "Sub2API 安全精准升级"
-  short_description: "按生产活跃面和 U/M diff 精准验证、发布与回滚"
-  default_prompt: "使用 $sub2api-upgrade 按生产活跃能力和 U/M diff 精确选择验证 case，并完成 Sub2API 升级、回滚准备与收口。"
+  display_name: "Sub2API 安全快速升级"
+  short_description: "按差异和活跃能力精准验证、发布与回滚"
+  default_prompt: "使用 $sub2api-upgrade 按上游与 MINE 差异、生产活跃能力精准规划验证；按受影响职责动态启用无冲突只读子代理，由主代理完成 Sub2API 升级、发布与收口。"

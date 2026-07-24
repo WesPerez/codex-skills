@@ -10,7 +10,7 @@
 
 用 `run-debug-matrix.sh` 固化记录：running attempt 可续接；failed/blocked 后必须显式新 attempt。开发循环用 `mode=dev`；最终 SHA 用 `mode=release`，每个 passed case 必须提供证据文件，R0-7/log executor 必须提供任务归属的 debug 日志窗，skip 必须有原因。只有 `seal` 生成且经 `verify-release-evidence.sh` 复核的 `release-evidence.json` 可进入 promotion 和生产 apply。
 
-先用 `run-debug-adapter.sh run-ready` 串行处理全部可执行项；R0-7 始终最后运行，跨 run 也禁止并发争用同一 debug Compose/fixture。catalog 有 44 个可选场景，但计划默认只选 R0 与实际触发项；当前仅 R0-1、R0-2、R0-7 有自动 adapter，其他被选场景在 case 脚本完成真实审计前保持 manual。自动 passed 必须绑定同 run/case/attempt 的 adapter checkpoint、evidence/log hash；manual passed 必须使用 `kind=manual-verification` 的结构化 JSON。runner 不接受任意命令、URL、日志路径或服务名，不确定的真实请求禁止自动重放。
+先用 `run-debug-adapter.sh run-ready` 串行处理全部可执行项。manual/rollback case 首轮会落为 `needs_manual`；只要其他选中 case 尚未全部 `passed/skipped_not_triggered`，R0-7 就保持 pending，单 case release `run` 也不能绕过。补齐结构化 evidence 后再次执行 `run-ready`，让 R0-7 扫描最终 canary 窗；若旧 run 的 R0-7 已过早 passed，runner 自动创建最终 attempt。seal/verify 用 adapter checkpoint 的 `log_window.until` 确认覆盖其他最终 passed attempt。跨 run 禁止并发争用同一 debug Compose/fixture。catalog 有 44 个可选场景，但计划默认只选 R0 与实际触发项；当前仅 R0-1、R0-2、R0-7 有自动 adapter，其他被选场景在 case 脚本完成真实审计前保持 manual。自动 passed 必须绑定同 run/case/attempt 的 adapter checkpoint、evidence/log hash；manual passed 必须使用 `kind=manual-verification` 的结构化 JSON。runner 不接受任意命令、URL、日志路径或服务名，不确定的真实请求禁止自动重放。
 
 release 模式中三类证据有机器契约：R0-1 必须是 `candidate-identity`，并把真实 workflow run 写入 sealed `source_run_id`；R0-8/R1-M3 必须是 `rollback-compatibility`；其余 manual case 必须是 `manual-verification`，绑定 case、attempt、revision、digest、debug target、verifier、procedure 和全部通过的 assertions。自动 evidence 还必须来自同 attempt 的 adapter checkpoint。空文件、普通文字、模板占位或手写自动证据不能 seal。
 

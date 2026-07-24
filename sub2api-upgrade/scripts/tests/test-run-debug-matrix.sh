@@ -25,7 +25,7 @@ init_run() {
 pass_all_r0() {
   local dir="$1"
   local c ev log
-  for c in R0-1 R0-2 R0-3 R0-4 R0-5 R0-6 R0-7 R0-8; do
+  for c in R0-1 R0-2 R0-3 R0-4 R0-5 R0-6 R0-8 R0-7; do
     ev="$TMP/$(basename "$dir")-${c}-evidence.json"
     case "$c" in
       R0-1)
@@ -77,6 +77,15 @@ assert_ok "verify" bash "$RUNNER" verify --run-dir "$TMP/run1"
 
 # refuse overwrite passed
 assert_fail "no-overwrite-passed" bash "$RUNNER" start --run-dir "$TMP/run1" --case R0-1
+
+# R0-7 alone may open an explicit final attempt after later canaries.
+init_run "$TMP/run1-r07-refresh" dev
+bash "$RUNNER" start --run-dir "$TMP/run1-r07-refresh" --case R0-7 >/dev/null
+bash "$RUNNER" finish --run-dir "$TMP/run1-r07-refresh" --case R0-7 --status passed >/dev/null
+assert_ok "r07-final-new-attempt" bash "$RUNNER" start --run-dir "$TMP/run1-r07-refresh" \
+  --case R0-7 --new-attempt
+jq -e '.cases[] | select(.id=="R0-7") | .status=="running" and .current_attempt==2' \
+  "$TMP/run1-r07-refresh/state.json" >/dev/null
 
 # owner mismatch
 mkdir -p "$TMP/badowner"
@@ -154,6 +163,18 @@ assert_fail "tampered-release-evidence" bash "$RUNNER" verify --run-dir "$TMP/ru
 # seal refuses R0 skip already covered; seal refuses incomplete
 init_run "$TMP/run7" release
 assert_fail "seal-incomplete" bash "$RUNNER" seal --run-dir "$TMP/run7"
+
+# Seal refuses a log gate that clearly predates another final case attempt.
+init_run "$TMP/run7-early-log" release
+pass_all_r0 "$TMP/run7-early-log"
+bash "$RUNNER" start --run-dir "$TMP/run7-early-log" --case R1-X1 >/dev/null
+bash "$RUNNER" finish --run-dir "$TMP/run7-early-log" --case R1-X1 --status skipped_not_triggered \
+  --note "suite not selected" >/dev/null
+jq '(.cases[] | select(.id=="R0-8") | .attempts[] | select(.attempt==1) | .ended_at)="2099-01-01T00:00:00Z"' \
+  "$TMP/run7-early-log/state.json" > "$TMP/run7-early-log/state.tmp"
+mv "$TMP/run7-early-log/state.tmp" "$TMP/run7-early-log/state.json"
+assert_fail "verify-requires-final-r07-window" bash "$RUNNER" verify --run-dir "$TMP/run7-early-log"
+assert_fail "seal-requires-final-r07-window" bash "$RUNNER" seal --run-dir "$TMP/run7-early-log"
 
 # tampered evidence
 init_run "$TMP/run8" dev

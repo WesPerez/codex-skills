@@ -42,24 +42,23 @@
 
 ### A. 候选一次成型
 
-1. 同时读取上游新增提交、旧个性化职责、当前生产 revision 和部署约束。
-2. 先在本地完成职责对照、路径分类、迁移检查、`git diff --check`、版本/基线闸门和测试名映射。
-3. 把所有已知修复 amend/fixup 回职责提交后再第一次推 `debug`。
-4. 不用 GitHub CI 试错本可静态发现的语法、格式、未使用 import 或旧测试残留。
+1. 主代理先刷新 refs、核生产 revision 并冻结 SHA；无新上游时 no-op，不派发空任务。
+2. 按 [子代理编排](subagent-orchestration.zh-CN.md) 运行 Wave A：用最多 8 个只读代理并行审计上游、D1–D4、测试触发、运行事故和反向风险，全部 join 后由主代理写候选。
+3. 先在本地完成职责对照、路径分类、迁移检查、`git diff --check`、版本/基线闸门和测试名映射。冻结 candidate SHA 后运行 Wave B 只读复核；主代理统一收敛一次。
+4. 把所有已知修复 amend/fixup 回职责提交后再第一次推 `debug`。不用 GitHub CI 试错本可静态发现的语法、格式、未使用 import、职责遗漏或旧测试残留。
 
 ### B. CI 等待期间并行
 
 推 `debug` 后并行执行：
 
-- `wait-branch-image.sh` 等精确 run；
-- `check-debug-isolation.sh` 与端口检查；
-- 生成本次矩阵、预期负例和日志时间窗模板；
-- 核对合成 fixture manifest、专属 canary 目录和 debug 快照位置；
-- 运行只读生产 preflight，记录当前 revision/health/Watchtower；
-- 用最小只读汇总生成仅含 provider/feature 名称的 active inventory，不保存账号、凭据或业务明细；
-- 准备最终报告的职责表和回滚判定表。
+- 唯一 CI waiter 用不带 `--pull` 的 `wait-branch-image.sh` 等精确 run；主代理在 join 后 `--no-wait --pull`；
+- 只读代理核对 `check-debug-isolation.sh`、端口、fixture manifest、专属 canary 目录和 debug 快照位置；
+- 只读代理核对选中 case、预期负例、日志时间窗需求和最终报告输入，不创建 matrix/evidence；
+- 只读代理运行不触及数据库的生产 preflight，记录当前 revision/health/Watchtower；
+- 主代理用最小只读汇总生成仅含 provider/feature 名称的 active inventory，不保存账号、凭据或业务明细；
+- 主代理在 join 后生成 matrix、日志模板、职责表和回滚判定表。
 
-不要并行执行会争用同一 canary 账号、更新相同 fixture map、触发相同一次性 OAuth refresh 或共享日志断言的场景。
+子代理只做只读检查或 dry-run；生产 inventory、debug start/stop、snapshot apply、pull、matrix/evidence 写入仍由主代理完成。不要并行执行会争用同一 canary 账号、更新相同 fixture map、触发相同一次性 OAuth refresh 或共享日志断言的场景。等待期发现问题就停止旧 SHA，不边修改候选边继续等待。
 
 ### C. Debug 数据保留策略
 
@@ -88,9 +87,9 @@
 
 **release 隔离**：`mode=release` 禁止 fault injection、临时 SQL 改库、Sub2API Test Connection。上述手段只允许独立 `mode=dev` 实验 run，其 attempt/日志/fixture 变更不得进入 seal、promotion 或生产 evidence。R0-1/R0-2 无业务日志不构成失败；R0-7 仍要求非空且归属明确的日志窗。生产 post-confirm 可把确实为空且无 fatal 的窗记录为 clean empty window，但不能拿它替代 debug R0-7。
 
-使用 `run-debug-matrix.sh` 管理 attempt：失败或 blocked 后只有显式 `--new-attempt` 才能复测；running attempt 只能续接。release mode 的 passed case 必须带证据，R0-7/log executor 必须带日志窗，skip 必须说明原因。任何 commit 变化都必须重跑发布门禁。最终只接受 `seal` 生成且经 `verify-release-evidence.sh` 复核的 `release-evidence.json`。
+使用 `run-debug-matrix.sh` 管理 attempt：失败或 blocked 后只有显式 `--new-attempt` 才能复测；running attempt 只能续接。release mode 的 passed case 必须带证据，R0-7/log executor 必须带日志窗，skip 必须说明原因。`run-ready` 在其他选中 case 未全部 passed/skipped 时延后 R0-7，单 case release `run` 也拒绝提前执行；补齐人工 evidence 后再跑一次。旧的 early-pass R0-7 会自动刷新，seal/verify 以 `log_window.until` 证明最终日志窗覆盖最后 passed canary。任何 commit 变化都必须重跑发布门禁。最终只接受 `seal` 生成且经 `verify-release-evidence.sh` 复核的 `release-evidence.json`。
 
-用 `run-debug-adapter.sh run-ready` 代替逐条启动 runner。它对固定 debug 环境加跨 run 全局锁、按 plan 串行、把 R0-7 放到最后，并从 matrix state 恢复 running/pending case；不会并发争用账号、fixture 或日志。adapter catalog 在 matrix init 时复制并绑定 hash；runner 不接收命令、URL、Compose 目录或服务名。每个 attempt 记录 `prepared -> executing -> adapter_done -> logs_done -> finished` checkpoint；`no_replay` 中断后 blocked，不自动重复生成或计费。
+用 `run-debug-adapter.sh run-ready` 代替逐条启动 runner。它对固定 debug 环境加跨 run 全局锁、按 plan 串行，把 R0-7 排到最后并在前置 case 未完成时保持 pending，再从 matrix state 恢复 running/pending/stale-final case；不会并发争用账号、fixture 或日志。adapter catalog 在 matrix init 时复制并绑定 hash；runner 不接收命令、URL、Compose 目录或服务名。每个 attempt 记录 `prepared -> executing -> adapter_done -> logs_done -> finished` checkpoint；`no_replay` 中断后 blocked，不自动重复生成或计费。
 
 当前自动化状态必须如实报告：catalog 有 44 个可选场景，planner 默认只纳入 R0 与实际触发 case；只有 R0-1（身份）、R0-2（候选启动/健康/运行绑定）和 R0-7（致命日志模式扫描）已有自动 adapter。其余被选普通场景使用 `manual-verification`，被选的 R0-8/R1-M3 使用结构化回退证明。`run-ready` 返回 78 代表仍有人工门禁，不是成功。新增协议 adapter 前必须先有固定 debug fixture、确定性断言、no-replay 策略和测试；catalog 只有在脚本经过真实 debug 审计后才改回自动。
 
@@ -112,8 +111,8 @@
 
 | 阶段 | 起止点 |
 | --- | --- |
-| discovery | 拉取 refs 到职责对照完成 |
-| candidate | 开始语义重建到首次推 debug |
+| discovery | 拉取 refs、Wave A 派发到全部 join/职责对照完成 |
+| candidate | 开始语义重建、Wave B 复核到首次推 debug |
 | ci_debug | push 到固定 debug image 通过 |
 | debug_setup | isolation 检查到 fixture/snapshot 就绪 |
 | matrix | 第一条 canary 到最终日志门禁 |
@@ -122,6 +121,8 @@
 | cleanup | debug stop 到 recovery run 收口计划完成 |
 
 只用阶段数据优化下一轮；不要把用户 idle、真实故障定位或外部 provider 冷却混算成脚本耗时。
+
+同时记录首次推送前的子代理数、候选 SHA 数、首次 CI 是否通过、selected/manual/blocked case 数和 apply→confirm 间隔。目标是减少候选轮次与人工返工，不是最大化代理数量。
 
 ## 失败即停的性能优化边界
 

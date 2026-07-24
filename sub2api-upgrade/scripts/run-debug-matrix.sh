@@ -309,6 +309,47 @@ revalidate_release_passed_cases() {
   done < <(jq -r '.cases[] | select(.status=="passed") | [.id, .status, (.current_attempt|tostring), (.executor // "")] | @tsv' <<<"$state")
 }
 
+assert_final_log_gate_latest() {
+  local LC_ALL=C
+  local state="$1"
+  [[ "$(jq -r '.mode' <<<"$state")" == "release" ]] || return 0
+  [[ "$(jq -r '[.cases[] | select(.id=="R0-7") | .status][0] // "missing"' <<<"$state")" == "passed" ]] \
+    || return 0
+
+  local r07_attempt latest_other latest_case checkpoint log_until
+  r07_attempt="$(jq -r '
+    [.cases[] | select(.id=="R0-7")
+     | .current_attempt as $current
+     | .attempts[]
+     | select(.attempt==$current and .status=="passed")
+     | .attempt][0] // 0
+  ' <<<"$state")"
+  [[ "$r07_attempt" =~ ^[0-9]+$ && "$r07_attempt" -ge 1 ]] \
+    || die "R0-7 current passed attempt is invalid"
+  checkpoint="$RUN_DIR/cases/R0-7/attempt-$(printf '%03d' "$r07_attempt")/adapter-state.json"
+  [[ -f "$checkpoint" && ! -L "$checkpoint" ]] || die "R0-7 adapter checkpoint is missing or unsafe"
+  log_until="$(jq -r '.log_window.until // .log_until // empty' "$checkpoint")"
+  [[ "$log_until" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] \
+    || die "R0-7 current attempt has no valid log-window until"
+
+  IFS=$'\t' read -r latest_other latest_case < <(jq -r '
+    [.cases[]
+     | select(.id != "R0-7")
+     | . as $case
+     | .current_attempt as $current
+     | .attempts[]
+     | select(.attempt==$current)
+     | select(.status=="passed")
+     | select(.ended_at | type=="string")
+     | {id:$case.id, ended_at:.ended_at}]
+    | if length==0 then ["",""] else (max_by(.ended_at) | [.ended_at,.id]) end
+    | @tsv
+  ' <<<"$state")
+  if [[ -n "$latest_other" && "$log_until" < "$latest_other" ]]; then
+    die "R0-7 log window ended at $log_until before final case $latest_case at $latest_other; rerun R0-7 after all canaries"
+  fi
+}
+
 
 atomic_write_json() {
   local dest="$1"
@@ -601,8 +642,6 @@ cmd_start() {
   [[ -n "$case_json" ]] || die "case not in plan: $CASE_ID"
   local cur_status
   cur_status="$(jq -r '.status' <<<"$case_json")"
-  [[ "$cur_status" != "passed" ]] || die "case already passed; refuse overwrite (use a new run)"
-
   local next_attempt current_attempt
   current_attempt="$(jq -r '.current_attempt // 0' <<<"$case_json")"
   case "$cur_status" in
@@ -618,6 +657,11 @@ cmd_start() {
     failed|blocked|needs_manual|skipped_not_triggered)
       (( FORCE_NEW_ATTEMPT == 1 )) \
         || die "case status is $cur_status; an explicit --new-attempt is required"
+      next_attempt=$((current_attempt + 1))
+      ;;
+    passed)
+      [[ "$CASE_ID" == "R0-7" && "$FORCE_NEW_ATTEMPT" -eq 1 ]] \
+        || die "case already passed; refuse overwrite (only R0-7 may run a final --new-attempt)"
       next_attempt=$((current_attempt + 1))
       ;;
     *) die "case has unsupported status: $cur_status" ;;
@@ -896,6 +940,7 @@ cmd_verify() {
   [[ -z "$DIGEST" || "$DIGEST" == "$bound_digest" ]] || die "requested digest does not match the sealed binding"
   [[ -z "$CONFIG_FINGERPRINT" || "$CONFIG_FINGERPRINT" == "$bound_config" ]] \
     || die "requested config fingerprint does not match the sealed binding"
+  assert_final_log_gate_latest "$state"
 
   # verify evidence sha bindings still match
   local bad="" rel sha f cur
@@ -1011,6 +1056,7 @@ cmd_seal() {
     [[ "$st" == "passed" ]] || die "seal requires $rid=passed (got $st)"
   done
 
+  assert_final_log_gate_latest "$state"
   revalidate_release_passed_cases "$state"
   cmd_verify >/dev/null || die "seal integrity verification failed"
 

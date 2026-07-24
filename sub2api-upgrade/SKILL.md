@@ -1,15 +1,29 @@
 ---
 name: sub2api-upgrade
-description: 安全且尽可能快速地将此主机上的 Sub2API 升级到已验证的上游新版，语义重建 MINE 个性化差异，复用持久化隔离 debug 数据、生产只读活跃能力清单和按 diff 精确触发的验证 case，再执行精确 SHA 绑定、受控生产切换、回滚与收口。用户说“更新sub2”“更新 Sub2API”“升级sub2”“同步 Sub2API 最新版”“升级到最新版本”，或要求优化/审计 Sub2API 升级、debug 验证、升级耗时和测试场景时使用。不用于账号导入、通用管理 API、K12/Grok OAuth 生命周期、单独排障或纯源码审查。
+description: 安全且尽可能快速地将此主机上的 Sub2API 升级到已验证的上游新版；由主代理语义重建 MINE 个性化差异，复用持久化隔离 debug 数据、生产只读活跃能力清单和按 diff 精确触发的验证 case，并按受影响职责动态启用最多 8 个无冲突只读子代理完成发现与复核，再执行精确 SHA 绑定、受控生产切换、回滚与收口。用户说“更新sub2”“更新 Sub2API”“升级sub2”“同步 Sub2API 最新版”“升级到最新版本”，或要求优化/审计 Sub2API 升级、debug 验证、升级耗时和测试场景时使用。不用于账号导入、通用管理 API、K12/Grok OAuth 生命周期、单独排障或纯源码审查。
 ---
 
 # Sub2API 安全快速升级
 
-把速度来自复用、并行和确定性脚本，而不是删门禁。不能承诺绝对零风险；任何未解释失败都停止。用户只说“更新sub2”时，授权执行已验证的正常生产升级、升级专属备份和本技能创建产物的收口；当前请求若指定停点则服从停点。历史会话的一次性生产写库、广泛清理或停服务授权不延续。
+把速度来自一次成型、按职责动态扩缩的安全只读扇出、等待重叠、复用和确定性脚本，而不是删门禁。不能承诺绝对零风险；任何未解释失败都停止。用户只说“更新sub2”时，授权执行已验证的正常生产升级、升级专属备份和本技能创建产物的收口；当前请求若指定停点则服从停点。历史会话的一次性生产写库、广泛清理或停服务授权不延续。
 
-先读取 [运行时档案](references/runtime-profile.zh-CN.md)、[历史事故与控制](references/historical-incidents.zh-CN.md)、[当前个性化职责](references/current-customization-duties.zh-CN.md) 和 [快速流水线](references/fast-upgrade-pipeline.zh-CN.md)。取得候选 diff 后按触发套件读取 [Debug 验证矩阵](references/debug-verification-matrix.zh-CN.md)。近期会话只补充档案尚未覆盖的新失败模式；不要每次从零重读全部历史。
+先读取 [运行时档案](references/runtime-profile.zh-CN.md)、[历史事故与控制](references/historical-incidents.zh-CN.md)、[当前个性化职责](references/current-customization-duties.zh-CN.md)、[快速流水线](references/fast-upgrade-pipeline.zh-CN.md) 和 [子代理编排](references/subagent-orchestration.zh-CN.md)。取得候选 diff 后按触发套件读取 [Debug 验证矩阵](references/debug-verification-matrix.zh-CN.md)。近期会话只补充档案尚未覆盖的新失败模式；不要每次从零重读全部历史。
 
 **当前生产基线（2026-07-24）**：`0.1.164` / `61d5b363fe7cd370f73517973aec361303afb77f`；上一生产 `13b41759f68a85d86c38fba4dad12f13b4792682`。下一次升级以实时 inspect 为准。
+
+## 默认并发编排
+
+每次真实升级先由主代理完成快速闸门：核实目标与生产 revision，刷新一次 refs，冻结完整 SHA、分支头和工作树状态。若 `upstream/main` 没有超出 running upstream base 的新提交且无额外修复，直接报告 no-op；不要创建候选、跑 CI 或机械启动 8 个代理。
+
+闸门通过后按实际受影响职责和 [子代理编排](references/subagent-orchestration.zh-CN.md) 执行：
+
+1. **Wave A 发现**：按实际非空职责启用 1–8 个只读 `explorer`，大版本可分别审计上游风险、D1–D4、测试/plan、运行事故与反向风险。全部使用冻结 SHA；子代理不 fetch、不 checkout、不写文件、不碰容器/数据库/凭据/远端。
+2. **主代理单写**：等待全部结果，合成职责表后由主代理独自语义重建和提交。不得多个代理同时修改共享工作树。
+3. **Wave B 候选复核**：冻结 candidate SHA，暂停写入，按非空风险面启用 1–6 个只读复核代理检查职责、迁移、测试映射、部署和独立反向风险；小改动可合并职责。只合并一次修复；SHA 改变后定向复核受影响职责，未解释分歧不得推 debug。
+4. **Wave C 等待重叠**：CI waiter 只查精确 run、不 pull；其他只读代理核对 isolation/fixture/snapshot dry-run、matrix/负例、生产状态与报告输入。主代理在 join 后拉镜像，并独占 matrix/evidence 写入和共享 debug。
+5. **共享状态串行**：Git 写入、本地/CI 测试调度、debug Compose/fixture/canary/matrix/evidence、promotion、生产 apply/confirm/rollback/finalize 始终由主代理独占。审查代理不启动测试或后台进程；空闲槽不能用来并发争用这些资源。
+
+最多 8 是容量，不是配额。只有独立证据包能覆盖关键路径或外部等待窗时才派发；主代理复核所有证据并在结束前收齐或终止全部子任务。
 
 ## 不可跳过的门禁
 
@@ -46,8 +60,8 @@ description: 安全且尽可能快速地将此主机上的 Sub2API 升级到已�
 
 ### 1. 建立候选与计划
 
-1. 读取仓库 `AGENTS.md`、`BRANCH_DEPLOYMENT.md` 和关联源码/测试；刷新 `origin`、`upstream` refs，确认工作树与分支头。
-2. 记录运行中生产 revision。完成语义重建后运行：
+1. 读取仓库 `AGENTS.md`、`BRANCH_DEPLOYMENT.md` 和关联源码/测试；由主代理刷新一次 `origin`、`upstream` refs，确认工作树与分支头，记录运行中生产 revision。无更新时 no-op 停止；有更新时冻结全部输入 SHA。
+2. 按默认编排完成 Wave A；主代理汇总职责对照并独自语义重建。完成静态检查并创建候选提交后冻结 candidate SHA，执行 Wave B。主代理等待全部复核，统一修复后才生成最终计划：
 
 ```bash
 bash scripts/plan-sub2api-upgrade.sh \
@@ -58,19 +72,18 @@ bash scripts/plan-sub2api-upgrade.sh \
 ```
 
 先用最小只读汇总建立 active inventory；它只允许环境、时间、来源、provider 名和 feature 名，不得包含账号 ID、名称、凭据、token、连接信息或业务明细。脚本会阻止候选上游基线或 `VERSION` 倒退，分别记录 upstream、running customization、candidate customization 三类来源，并按精确规则选到 case。未提供 inventory 时需要真实 provider/feature 的 case 默认不选；可用 `--suite` 明确补充，`--all-suites` 仅用于有证据支持的全 catalog 审计。需要落盘时，`--output-dir` 只能是 `/root/backups/sub2api/upgrade-evidence/` 的直接子目录；人工仍须审查它没有漏掉动态配置和间接调用路径。
-3. 检查迁移、Compose、路由、协议转换、provider、Redis/PostgreSQL、后台任务和前端影响。新迁移只追加。
-4. 候选静态审计完成后才推 `debug`，避免用远端 CI 代替本可提前发现的语法、格式和职责问题。
+3. 检查迁移、Compose、路由、协议转换、provider、Redis/PostgreSQL、后台任务和前端影响。新迁移只追加。人工把动态配置与间接路径补入 plan；不以子代理多数意见替代证据。
+4. 候选静态审计与 Wave B 全部完成后才推 `debug`，避免用远端 CI 代替本可提前发现的语法、格式、职责和测试映射问题。
 
 ### 2. 等待精确 debug 镜像
 
 ```bash
 bash scripts/wait-branch-image.sh \
   --branch debug \
-  --expected-revision <candidate-sha> \
-  --pull
+  --expected-revision <candidate-sha>
 ```
 
-只接受 `Docker Branch Images` 对该完整 SHA 的成功 run，以及 `debug-sha-<40sha>` 不可变镜像中匹配的 revision/ref label 和 digest。等待期间完成可并行准备；CI 失败后读取精确 job 证据，先在本地静态修完同类问题再推下一 SHA。
+把此无 pull waiter 交给唯一只读子代理，并在等待期间按 Wave C 完成互不争用的准备。join 后由主代理用同一命令追加 `--no-wait --pull`，只接受 `Docker Branch Images` 对该完整 SHA 的成功 run，以及 `debug-sha-<40sha>` 不可变镜像中匹配的 revision/ref label 和 digest。CI 失败后读取精确 job 证据，先在本地静态修完同类问题再推下一 SHA；等待期发现候选问题也先停止，禁止边改 SHA 边继续等待旧 run。
 
 ### 3. 复用隔离 debug 并验证
 
@@ -85,7 +98,7 @@ bash scripts/wait-branch-image.sh \
    - 真实生成烟测遵守全局规则：使用有意义的代表任务、控制次数和预算；官方 Codex 链路只能由当前官方客户端发起；禁止 Sub2API `Test Connection` 和伪造 Codex 请求头。
 5. 用 `compute-debug-config-fingerprint.sh --json` 生成统一的非敏感配置指纹，再用 `run-debug-matrix.sh` 记录可恢复 attempt。中间修复时跑 `R0 + 受影响套件 + 日志窗`；任何新 commit 都使旧 SHA 证据失效。最终 commit 使用 `mode=release` 重新跑完整选中矩阵，passed case 必须带证据，R0-7 必须带日志窗；R0-1/R0-8 使用 `references/*-evidence.template.json` 的机器契约，人工 case 使用 `manual-verification-evidence.template.json`，最后 `seal` 生成 `release-evidence.json`。
    **release 隔离**：`mode=release` 禁止 fault injection、临时 SQL 改库和 Sub2API Test Connection。这些只可在独立 `mode=dev` 实验 run 中使用，且其日志、fixture 变更与 attempt **不得** 并入 release seal / promotion / 生产 evidence。R0-1/R0-2 未产生业务日志不等于失败；R0-7 仍须有非空、归属明确的日志窗且不得含 fatal 模式。生产 post-confirm 的日志窗单独归档，空窗可记录为 clean empty window，不能反向充当 debug R0-7 证据。
-   先用 `run-debug-adapter.sh run-ready --run-dir <dir>` 串行处理全部未完成 case；它跨 run 共用 debug 全局锁，把 R0-7 固定到最后，并按 blocked(71) > failed(70) > needs_manual(78) > passed(0) 汇总。当前只有 R0-1、R0-2、R0-7 是自动 adapter；其余场景在经过真实 debug 审计并落地 case 脚本前明确为 manual。自动 pass 必须绑定同 attempt 的 adapter checkpoint；manual pass 必须是结构化 JSON，普通文字、占位证据、任意 shell/URL/path 都不能进入 release seal。中断的 `no_replay` 请求只收束为 blocked，不自动重发。
+   先用 `run-debug-adapter.sh run-ready --run-dir <dir>` 串行处理全部未完成 case；它跨 run 共用 debug 全局锁，并按 blocked(71) > failed(70) > needs_manual(78) > passed(0) 汇总。只要其他选中 case 尚未全部 `passed/skipped_not_triggered`，runner 就把 R0-7 保持为 pending，单 case release `run` 也拒绝提前执行；补齐结构化 manual/rollback evidence 后再次运行 `run-ready`，让 R0-7 扫到最终 canary 窗。旧 run 若已有过早的 passed R0-7，`run-ready` 自动创建最终 attempt；seal/verify 按 adapter checkpoint 的真实 `log_window.until` 拒绝未覆盖其他最终 passed attempt 的证据。当前只有 R0-1、R0-2、R0-7 是自动 adapter；其余场景在经过真实 debug 审计并落地 case 脚本前明确为 manual。自动 pass 必须绑定同 attempt 的 adapter checkpoint；manual pass 必须是结构化 JSON，普通文字、占位证据、任意 shell/URL/path 都不能进入 release seal。中断的 `no_replay` 请求只收束为 blocked，不自动重发。
 6. 预列故意负例的 UTC 时间窗、预期状态码和日志形状。任何 panic、迁移失败、HTTP 200 后的 `response.failed`、非预期 4xx/5xx、协议终态缺失或新增未解释 error 都必须定位。
 
 ### 4. 推进同一 SHA
@@ -153,7 +166,7 @@ bash scripts/confirm-production-upgrade.sh \
 ## 运行时脚本
 
 - `scripts/plan-sub2api-upgrade.sh`：只读验证版本/上游基线，消费脱敏 active inventory，按 U/M diff 精确选 case（禁止默认全 catalog）；无 debug 身份时在计划阶段标记窄化闭环。
-- `scripts/wait-branch-image.sh`：等待精确 GitHub run，验证固定分支镜像 revision/digest。
+- `scripts/wait-branch-image.sh`：等待精确 GitHub run；无 `--pull` 时只返回 run/SHA 状态，主代理使用 `--no-wait --pull` 后再验证固定分支镜像 revision/digest。
 - `scripts/check-debug-isolation.sh`：只读检查 debug 路径、镜像、端口、数据目录与生产隔离。
 - `scripts/compute-debug-config-fingerprint.sh`：从稳定隔离字段、Compose 原文件、环境键集合和配置键路径计算非敏感指纹。
 - `scripts/check-debug-fixture-manifest.sh`：校验合成 fixture、字段集规范哈希与敏感信息边界。

@@ -219,16 +219,44 @@ attempt_count() {
   jq -r --arg id "$case_id" '.cases[] | select(.id==$id) | (.current_attempt|tostring)' "$dir/state.json"
 }
 
-# run-ready default: serial unfinished cases, R0-7 last, summary needs_manual=78
+# run-ready default: serial unfinished cases; R0-7 stays pending until manual work is complete.
 make_run "$TMP/run-ready-default"
 assert_exit "run-ready-default-78" 78 bash "$RUNNER" run-ready --run-dir "$TMP/run-ready-default"
 [[ "$(matrix_case_status "$TMP/run-ready-default" R0-1)" == "passed" ]]
 [[ "$(matrix_case_status "$TMP/run-ready-default" R0-2)" == "passed" ]]
 [[ "$(matrix_case_status "$TMP/run-ready-default" R0-3)" == "needs_manual" ]]
 [[ "$(matrix_case_status "$TMP/run-ready-default" R0-6)" == "needs_manual" ]]
-[[ "$(matrix_case_status "$TMP/run-ready-default" R0-7)" == "passed" ]]
+[[ "$(matrix_case_status "$TMP/run-ready-default" R0-7)" == "pending" ]]
 [[ "$(matrix_case_status "$TMP/run-ready-default" R0-8)" == "needs_manual" ]]
-echo "PASS run-ready-reached-r0-7"; PASS=$((PASS+1))
+echo "PASS run-ready-deferred-r0-7"; PASS=$((PASS+1))
+
+# After manual gates are completed, a second batch runs the pending final log gate.
+for case_id in R0-3 R0-4 R0-5 R0-6 R0-8; do
+  bash "$MATRIX" start --run-dir "$TMP/run-ready-default" --case "$case_id" --new-attempt >/dev/null
+  bash "$MATRIX" finish --run-dir "$TMP/run-ready-default" --case "$case_id" --status passed >/dev/null
+done
+bash "$MATRIX" start --run-dir "$TMP/run-ready-default" --case R1-X1 --new-attempt >/dev/null
+bash "$MATRIX" finish --run-dir "$TMP/run-ready-default" --case R1-X1 --status skipped_not_triggered \
+  --note "suite not selected" >/dev/null
+assert_exit "run-ready-final-r07" 0 bash "$RUNNER" run-ready --run-dir "$TMP/run-ready-default"
+[[ "$(matrix_case_status "$TMP/run-ready-default" R0-7)" == "passed" ]]
+echo "PASS run-ready-final-r0-7"; PASS=$((PASS+1))
+
+# A stale passed R0-7 is refreshed automatically instead of becoming unrecoverable.
+jq '.log_window.until="2000-01-01T00:00:00Z" | .log_until="2000-01-01T00:00:00Z"' \
+  "$TMP/run-ready-default/cases/R0-7/attempt-001/adapter-state.json" \
+  > "$TMP/run-ready-default/cases/R0-7/attempt-001/adapter-state.tmp"
+mv "$TMP/run-ready-default/cases/R0-7/attempt-001/adapter-state.tmp" \
+  "$TMP/run-ready-default/cases/R0-7/attempt-001/adapter-state.json"
+assert_exit "run-ready-refresh-stale-r07" 0 bash "$RUNNER" run-ready --run-dir "$TMP/run-ready-default"
+[[ "$(attempt_count "$TMP/run-ready-default" R0-7)" == "2" ]]
+echo "PASS run-ready-refreshed-r0-7"; PASS=$((PASS+1))
+
+# Single-case release execution cannot bypass the final-gate ordering.
+make_run "$TMP/run-r07-release-early" release
+assert_exit "release-r07-refuses-unresolved-cases" 71 bash "$RUNNER" run \
+  --run-dir "$TMP/run-r07-release-early" --case R0-7
+[[ "$(matrix_case_status "$TMP/run-r07-release-early" R0-7)" == "pending" ]]
 
 # first-nonpass: stop at first needs_manual (R0-3); R0-7 remains pending
 make_run "$TMP/run-ready-first"

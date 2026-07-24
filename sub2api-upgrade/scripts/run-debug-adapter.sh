@@ -47,8 +47,10 @@ Usage:
 Recoverable fixed-allowlist adapter runner. Reads adapter-catalog.tsv inside the
 matrix run directory. Does not eval and does not accept command/url/path targets.
 Exit codes: 0=passed, 70=failed, 78=needs_manual, 71=blocked.
-run-ready processes unfinished matrix cases serially (R0-7 last); batch exit
-priority is blocked(71) > failed(70) > needs_manual(78) > 0.
+run-ready processes unfinished matrix cases serially. R0-7 is last and remains
+pending until every other selected case is passed/skipped; a stale passed R0-7
+is refreshed automatically. Batch exit priority is
+blocked(71) > failed(70) > needs_manual(78) > 0.
 USAGE
 }
 
@@ -611,7 +613,7 @@ drive_from_phase() {
   return "$EC_BLOCKED"
 }
 init_prepared_state() {
-  local attempt="$1" meta="$2" bindings="$3" attempt_dir state_path now log_since state
+  local attempt="$1" meta="$2" bindings="$3" attempt_dir state_path now log_since state note=""
   attempt_dir="$(attempt_dir_for "$attempt")"
   state_path="$(state_path_for "$attempt")"
   install -d -m 0700 "$RUN_DIR/cases/$CASE_ID" "$attempt_dir" "$attempt_dir/staging"
@@ -621,6 +623,9 @@ init_prepared_state() {
     log_since="$(jq -r '.created_at // empty' "$RUN_DIR/state.json")"
     [[ "$log_since" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] \
       || die "matrix run has no valid created_at for log-gate"
+  fi
+  if [[ "$CASE_ID" == "R0-7" && "$FORCE_NEW_ATTEMPT" -eq 1 ]]; then
+    note="final_log_gate_refresh"
   fi
   state="$(jq -n \
     --arg runner "$RUNNER_ID" \
@@ -636,8 +641,9 @@ init_prepared_state() {
     --arg config_fingerprint "$(jq -r '.config_fingerprint' <<<"$bindings")" \
     --arg started_at "$now" \
     --arg log_since "$log_since" \
+    --arg note "$note" \
     --argjson test_mode "$TEST_MODE" \
-    '{schema_version:1,runner:$runner,case_id:$case_id,attempt:$attempt,adapter_id:$adapter_id,resume_policy:$resume_policy,log_scope:$log_scope,timeout_seconds:$timeout_seconds,evidence_kind:$evidence_kind,phase:"prepared",result:null,exit_code:null,started_at:$started_at,updated_at:$started_at,ended_at:null,log_since:$log_since,log_until:null,log_window:null,evidence:null,note:null,test_mode:($test_mode==1),bindings:{revision:$revision,digest:$digest,config_fingerprint:$config_fingerprint}}')"
+    '{schema_version:1,runner:$runner,case_id:$case_id,attempt:$attempt,adapter_id:$adapter_id,resume_policy:$resume_policy,log_scope:$log_scope,timeout_seconds:$timeout_seconds,evidence_kind:$evidence_kind,phase:"prepared",result:null,exit_code:null,started_at:$started_at,updated_at:$started_at,ended_at:null,log_since:$log_since,log_until:null,log_window:null,evidence:null,note:(if $note=="" then null else $note end),test_mode:($test_mode==1),bindings:{revision:$revision,digest:$digest,config_fingerprint:$config_fingerprint}}')"
   write_state "$state_path" "$state"
   printf '%s\n' "$state"
 }
@@ -677,6 +683,12 @@ run_case_core() {
   bindings="$(load_matrix_bindings)"
   assert_matrix_bindings "$bindings"
   meta="$(load_adapter_meta "$CASE_ID")"
+  if [[ "$CASE_ID" == "R0-7" && "$(jq -r '.mode' "$RUN_DIR/state.json")" == "release" ]]; then
+    local unresolved_before_log_gate
+    unresolved_before_log_gate="$(unresolved_before_final_log_gate)"
+    [[ -z "$unresolved_before_log_gate" ]] \
+      || die "R0-7 is final; unresolved cases: $unresolved_before_log_gate"
+  fi
   if (( TEST_MODE == 1 )); then run_preflight_test "$bindings"; else run_preflight_non_test "$bindings"; fi
   matrix_start || die "matrix start refused the requested adapter attempt"
   matrix_case="$(matrix_case_json)"
@@ -788,6 +800,38 @@ list_ready_case_order() {
   ' "$RUN_DIR/state.json"
 }
 
+unresolved_before_final_log_gate() {
+  jq -r '
+    [.cases[]
+     | select(.id != "R0-7")
+     | select(.status != "passed" and .status != "skipped_not_triggered")
+     | .id] | join(",")
+  ' "$RUN_DIR/state.json"
+}
+
+r07_log_gate_is_current() {
+  local LC_ALL=C
+  local attempt checkpoint log_until latest_other
+  attempt="$(jq -r '[.cases[] | select(.id=="R0-7") | .current_attempt][0] // 0' "$RUN_DIR/state.json")"
+  [[ "$attempt" =~ ^[0-9]+$ && "$attempt" -ge 1 ]] || return 1
+  checkpoint="$(state_path_for "$attempt")"
+  [[ -f "$checkpoint" && ! -L "$checkpoint" ]] || return 1
+  log_until="$(jq -r '.log_window.until // .log_until // empty' "$checkpoint")"
+  [[ "$log_until" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || return 1
+  latest_other="$(jq -r '
+    [.cases[]
+     | select(.id != "R0-7" and .status == "passed")
+     | . as $case
+     | .current_attempt as $current
+     | .attempts[]
+     | select(.attempt==$current and .status=="passed")
+     | select(.ended_at | type=="string")
+     | .ended_at]
+    | max // ""
+  ' "$RUN_DIR/state.json")"
+  [[ -z "$latest_other" || "$log_until" == "$latest_other" || "$log_until" > "$latest_other" ]]
+}
+
 cmd_run_ready() {
   require_command jq; require_command sha256sum; require_command install; require_command date
   require_command awk; require_command mktemp; require_command realpath; require_command flock; require_command find; require_command sort
@@ -805,7 +849,7 @@ cmd_run_ready() {
   assert_matrix_bindings "$bindings"
   if (( TEST_MODE == 1 )); then run_preflight_test "$bindings"; else run_preflight_non_test "$bindings"; fi
 
-  local worst=0 case_id status rc=0 processed=0 skipped=0
+  local worst=0 case_id status rc=0 processed=0 skipped=0 deferred=0 refresh_r07=0
   local -a order=()
   mapfile -t order < <(list_ready_case_order)
   (( ${#order[@]} > 0 )) || die "matrix state has no cases"
@@ -815,12 +859,29 @@ cmd_run_ready() {
     CASE_ID="$case_id"
     ATTEMPT=""
     FORCE_NEW_ATTEMPT=0
+    refresh_r07=0
     assert_safe_case_id "$CASE_ID"
     status="$(jq -r --arg id "$CASE_ID" '.cases[] | select(.id==$id) | .status' "$RUN_DIR/state.json")"
     [[ -n "$status" ]] || die "case missing from matrix state: $CASE_ID"
 
-    case "$status" in
-      passed|failed|blocked|needs_manual|skipped_not_triggered)
+    if [[ "$CASE_ID" == "R0-7" ]]; then
+      local unresolved_before_log_gate
+      unresolved_before_log_gate="$(unresolved_before_final_log_gate)"
+      if [[ -n "$unresolved_before_log_gate" ]]; then
+        deferred=$((deferred + 1))
+        info "run-ready defer R0-7 until final cases complete: $unresolved_before_log_gate"
+        continue
+      fi
+      if [[ "$status" == "passed" ]] && ! r07_log_gate_is_current; then
+        refresh_r07=1
+        FORCE_NEW_ATTEMPT=1
+        info "run-ready refresh stale final R0-7 log window"
+      fi
+    fi
+
+    case "$status:$refresh_r07" in
+      passed:1) ;;
+      passed:0|failed:0|blocked:0|needs_manual:0|skipped_not_triggered:0)
         rc="$(matrix_status_to_exit "$status")"
         skipped=$((skipped + 1))
         info "run-ready skip terminal case=$CASE_ID status=$status"
@@ -831,14 +892,14 @@ cmd_run_ready() {
         fi
         continue
         ;;
-      pending|running) ;;
+      pending:0|running:0) ;;
       *)
         die "unsupported matrix case status for run-ready: $status"
         ;;
     esac
 
     with_lock
-    if [[ "$status" == "pending" ]]; then
+    if [[ "$status" == "pending" || "$refresh_r07" -eq 1 ]]; then
       if run_case_core; then rc=0; else rc=$?; fi
     else
       if resume_case_core; then rc=0; else rc=$?; fi
@@ -854,8 +915,8 @@ cmd_run_ready() {
     fi
   done
 
-  printf 'status=run_ready stop_on=%s processed=%s skipped_terminal=%s exit_code=%s\n' \
-    "$STOP_ON" "$processed" "$skipped" "$worst"
+  printf 'status=run_ready stop_on=%s processed=%s skipped_terminal=%s deferred_pending=%s exit_code=%s\n' \
+    "$STOP_ON" "$processed" "$skipped" "$deferred" "$worst"
   return "$worst"
 }
 
