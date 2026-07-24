@@ -42,7 +42,7 @@ def load_plan(path: str) -> tuple[dict[str, Any], str]:
     payload = json.loads(raw)
     if (
         not isinstance(payload, dict)
-        or payload.get("schema_version") != 6
+        or payload.get("schema_version") not in {6, 7}
         or payload.get("operation") != "sub2api-account-name-organize"
     ):
         raise ValueError("unsupported or malformed plan")

@@ -75,13 +75,24 @@ URL 比较会规范化 scheme/host、默认端口和尾部斜杠，并按 scheme
 - 指定标记顺序且 URL 组不超过 36 个时，使用紧凑前缀：`!` + 一位 URL 组 base36 + 一位组内标记 base36 + `-` 分隔符。不要把 URL、哈希或标记正文写进可见名称。
 - 需要防止同 URL 内的名称类别交叉时，使用有序的 `--name-bucket`。组内最后一位字符编码“名称类别序号 × 标记跨度 + 标记序号”，因此可先完整排列 Any，再排列 Claude，同时仍保持三字符前缀。
 
+使用可选本地排序策略时：
+
+- 默认路径固定为技能目录下的 `local/sort-policy.json`；不扫描 cwd、HOME 或环境变量。显式 `--policy` 优先，`--no-policy` 完全关闭策略。
+- 策略只保存数据：模型映射键前缀、精确 hostname、名称类别、组内标记和排除平台。供应商特例不得写入规划器常量。
+- `model_buckets` 只把 `credentials.model_mapping` 中键前缀命中且目标值非空的映射视为显式支持证据；可用 `platforms`、`account_types` 把规则限定在 APIKey 等目标账号。名称、简介或分组配置不能代替账号级映射证据，空 mapping 的运行时宽松行为也不能作为显式证据。
+- `route_buckets` 使用按运行时规则算出的有效 URL hostname 精确匹配，不做名称子串或模糊域名匹配。
+- 排序按模型桶优先，再按 route bucket 声明顺序；未命中项落在隐式 remaining。Grok 的 `zzzz-` 固定尾部规则仍优先。
+- 同一有效 URL 若混入不同模型能力层级，规划器必须失败，因为“所有支持账号全局排前”和“同 URL 永远连续”无法同时成立。
+- 策略文件存在但无效时失败；计划记录绝对来源路径和内容 SHA256。应用仍严格使用已生成计划，不在 SQL 阶段重新读取策略。
+
 ## 5. 计划审查
 
 计划包含：
 
 - 账号 ID、旧名称、新名称、完整原始 `base_name`。
-- URL 类别的安全标签、哈希和账号 ID 列表。
+- URL 类别的安全标签、哈希、稳定 ID 列表 `account_ids` 和最终名称升序列表 `display_account_ids`。
 - `platform/type/priority/status/schedulable/group_ids/proxy_id/parent_account_id/quota_dimension/concurrency/rate_multiplier` 的保护指纹，以及不含原始 URL 的路由类别指纹。
+- 模型映射指纹、命中的模型/路由桶、策略来源和策略 SHA256；不把 token 或完整 credentials 写入计划。
 - 截断标志、输入摘要哈希、忽略的软删除 ID。
 
 计划不包含原始 URL、token、credentials、extra 或管理员认证。
@@ -89,6 +100,7 @@ URL 比较会规范化 scheme/host、默认端口和尾部斜杠，并按 scheme
 审查时重点检查：
 
 - 每个类别是否确实符合用户意图。
+- 模型能力命中数是否来自账号级 `model_mapping`，且模型桶和 route bucket 的升序与策略声明一致。
 - 影子账号是否与母账号同类。
 - 是否存在过长名称截断；完整原名仍能从计划恢复。
 - 变更数是否与用户指定范围一致。

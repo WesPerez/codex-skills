@@ -1,6 +1,6 @@
 ---
 name: sub2api-account-organizer
-description: 按有效上游 URL、用户指定类别或平台短前缀安全整理 Sub2API 管理员账号列表，通过可回滚的显示名称前缀让同类账号在默认 name 升序中连续出现；内置将 Grok 统一为 zzzz- 短前缀并排到末尾，也支持按原名标记指定组内顺序或排除平台。适用于账号列表太乱、同 URL/同中继账号被穿插、要求所有 Grok 使用一致短前缀、想按名称标记排序、排除平台、整理或撤销显示顺序，或为了列表归类而提出交换/修改 accounts.id。默认只预览；生产应用只允许修改 accounts.name 与 updated_at，并同步调度显示缓存。不要用于真正的主键修复、账号删除、调度优先级调整、OAuth 凭据导入或分组绑定。
+description: 按有效上游 URL、可选本地策略中的显式模型映射与中继顺序、用户指定类别或平台短前缀安全整理 Sub2API 管理员账号列表，通过可回滚的显示名称前缀让同类账号在默认 name 升序中连续出现；内置将 Grok 统一为 zzzz- 短前缀并排到末尾。适用于账号列表太乱、显式映射指定模型的账号需要排前、同 URL/同中继账号被穿插、要求所有 Grok 使用一致短前缀、想按名称标记排序、排除平台、整理或撤销显示顺序，或为了列表归类而提出交换/修改 accounts.id。默认只预览；生产应用只允许修改 accounts.name 与 updated_at，并同步调度显示缓存。不要用于真正的主键修复、账号删除、调度优先级调整、OAuth 凭据导入或分组绑定。
 ---
 
 # Sub2API 账号整理
@@ -25,6 +25,10 @@ description: 按有效上游 URL、用户指定类别或平台短前缀安全整
 3. 为同一类别生成可排序前缀。Grok 固定使用 5 字符 `zzzz-`，所有未删除 Grok 账号共用此前缀并排在普通名称之后；该规则优先于 URL/标记前缀，但 `--exclude-platform grok` 仍可明确跳过。其他平台默认使用 `[@url:api.example.com:4f21ab93c2] `；用户指定名称标记顺序且 URL 组不超过 36 个时使用紧凑前缀 `!<URL组base36><组内标记base36>-`，例如 `!00-原名`。类别按 scheme/host/port/path 计算并忽略 query、userinfo、fragment；前缀不含原始 URL。
 4. 保留原名称作为 `base_name`；超过 100 字符时只截断写回名称，完整原名仍保存在权限为 `0600` 的计划中。
 5. 用名称升序查看账号；同一前缀的账号会连续出现。
+
+可选策略优先读取技能目录下的 `local/sort-policy.json`。该文件只保存当前安装实例的偏好，通用 Python 逻辑不得写死供应商、模型或 hostname；文件不存在时完全回到上述 URL/Grok 默认行为。可用 `--policy PATH` 显式选择其他策略，或用 `--no-policy` 忽略默认策略，两者不能同时传。未传二者时先找默认本地策略，不存在才使用无策略默认行为。文件存在但 JSON、schema、字段、hostname 或重复规则无效时必须停止，不得静默回退。
+
+策略中的 `model_buckets` 按 `credentials.model_mapping` 的非空映射键匹配，并可用 `platforms`、`account_types` 限定作用域；它代表“显式映射证据”，不根据账号名称猜测，也不把运行时空映射的宽松回退推断为已明确支持。`route_buckets` 只按有效路由的精确 hostname 匹配。排序键依次是：平台固定尾部规则、模型能力桶、路由桶、原名类别、组内标记和稳定 URL 次序。模型能力优先与 URL 连续性冲突时（同一有效 URL 混有不同模型能力层级）必须停止并报告冲突，不得悄悄违反其中任一要求。计划同时绑定策略 SHA256 和模型映射指纹。
 
 用户明确给出账号 ID 与类别时，可用 overrides 覆盖 URL 自动分组。不要根据邮箱域名、名称相似、创建时间或“看起来像同类”自行合并。
 
@@ -51,6 +55,8 @@ python3 scripts/plan_account_names.py plan \
   --output /root/backups/sub2api/account-organizer/<run-id>/plan.json
 ```
 
+上例会自动读取存在的 `local/sort-policy.json`。需要验证纯通用缺省行为时加 `--no-policy`；使用一次性或其他实例策略时加 `--policy /absolute/path/policy.json`。
+
 如有人工类别，使用 `--overrides overrides.json`。格式为账号 ID 到类别标签的对象，例如 `{"2011":"sharedchat","2048":"sharedchat"}`。
 
 如需排除平台并指定名称标记顺序，按顺序重复参数：
@@ -67,7 +73,7 @@ python3 scripts/plan_account_names.py plan \
   --order-marker 2548
 ```
 
-URL 组取组内最靠前的标记作为组顺序；同一 URL 内的账号再按各自最靠前的标记排序。一个名称命中多个标记时取用户列表中最靠前者。排除平台的账号不改名，也不进入 SQL。
+如果 CLI 显式提供任意 `--exclude-platform`、`--name-bucket` 或 `--order-marker`，该字段整体覆盖策略文件中的同名字段；未显式提供的字段继续使用策略。URL 组取组内最靠前的标记作为组顺序；同一 URL 内的账号再按各自最靠前的标记排序。一个名称命中多个标记时取用户列表中最靠前者。排除平台的账号不改名，也不进入 SQL。
 
 `--name-bucket` 是标记之上的原名类别顺序。例如先传 `any-`、再传 `claude`，则包含 `any-` 的 URL 组优先；同一 URL 内先排完 Any，再排 Claude，两个类别内部各自按 `--order-marker` 顺序。类别和标记会合并编码到同一个 base36 字符中，排序码保持三字符，随后用一个 `-` 与原名分隔。
 
@@ -75,7 +81,7 @@ URL 组取组内最靠前的标记作为组顺序；同一 URL 内的账号再�
 
 规划器会同时剥离旧的 `[@url:...] `、旧紧凑前缀和 Grok 的 `zzzz-`，再从 `base_name` 生成目标名称；重复规划不得叠加 `zzzz-zzzz-`。非 Grok 原名自然以 `zzzz-` 开头时必须保留，不得误剥离。
 
-向用户报告：环境、账号总数、变更数、类别数、每类的安全标签和 ID 列表、唯一会变化的数据库列、回滚文件路径。不要输出完整 URL、query、凭据、token 或整份账号响应。
+向用户报告：环境、策略来源及 SHA256、账号总数、模型能力命中数、变更数、类别数、每类的安全标签和 ID 列表、唯一会变化的数据库列、回滚文件路径。不要输出完整 URL、query、凭据、token 或整份账号响应。
 
 ### 3. 生产写入确认
 
@@ -90,7 +96,7 @@ python3 scripts/plan_account_names.py verify \
   --expect before
 ```
 
-任何账号增删、名称变化、有效路由类别变化、平台/类型/调度保护指纹变化都必须中止并重新生成计划。
+任何账号增删、名称变化、有效路由类别变化、模型映射变化、平台/类型/调度保护指纹变化都必须中止并重新生成计划。
 
 ### 4. 生成和执行受控 SQL
 

@@ -1,4 +1,4 @@
 interface:
   display_name: "Sub2API 账号整理"
-  short_description: "按 URL、标记和平台短前缀整理 Sub2API 账号并支持回滚"
-  default_prompt: "使用 $sub2api-account-organizer 整理 Sub2API 账号列表，并将 Grok 统一为短前缀后排到末尾。"
+  short_description: "按模型能力、URL 与本地策略安全整理账号并支持回滚"
+  default_prompt: "使用 $sub2api-account-organizer 按可选本地策略整理 Sub2API 账号，先预览模型能力和 URL 顺序，再安全应用并验证。"

@@ -41,8 +41,11 @@ def account(
     base_url: str = "",
     parent_account_id: int | None = None,
     extra: dict | None = None,
+    model_mapping: dict[str, str] | None = None,
 ) -> dict:
     credentials = {"base_url": base_url} if base_url else {}
+    if model_mapping is not None:
+        credentials["model_mapping"] = model_mapping
     return {
         "id": aid,
         "name": name,
@@ -195,6 +198,186 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in ordered], [41, 39, 40, 42, 43])
         self.assertTrue(all(len(row["new_name"]) - len(row["base_name"]) == 4 for row in ordered))
 
+    def test_name_buckets_without_markers_enable_compact_ordering(self) -> None:
+        plan = planner.build_plan(
+            [
+                account(391, "second", base_url="https://second.example/v1"),
+                account(392, "first-category", base_url="https://first.example/v1"),
+            ],
+            {},
+            name_buckets=["first-category"],
+        )
+        ordered = sorted(plan["verification_rows"], key=lambda row: row["new_name"])
+        self.assertEqual([row["id"] for row in ordered], [392, 391])
+        self.assertTrue(all(row["new_name"].startswith("!") for row in ordered))
+        self.assertEqual(plan["groups"][0]["display_account_ids"], [392])
+
+    def test_model_priority_precedes_route_policy_and_grok_stays_last(self) -> None:
+        rows = [
+            account(
+                393,
+                "other-supported",
+                base_url="https://other.example/v1",
+                model_mapping={"gpt-5.6-sol": "gpt-5.6-sol"},
+            ),
+            account(
+                394,
+                "ooioo-supported",
+                base_url="https://ooioo.work/v1",
+                model_mapping={"gpt-5.6-terra": "gpt-5.6-terra"},
+            ),
+            account(
+                395,
+                "any-supported",
+                base_url="https://anyrouter.top/v1",
+                model_mapping={"gpt-5.6-sol": "gpt-5.6-sol"},
+            ),
+            account(
+                396,
+                "any-unsupported",
+                base_url="https://unsupported.example/v1",
+                model_mapping={"grok-4.5": "grok-4.5"},
+            ),
+            account(397, "grok-account", platform="grok", account_type="oauth"),
+        ]
+        plan = planner.build_plan(
+            rows,
+            {},
+            model_buckets=[
+                {"label": "gpt-5.6", "model_mapping_key_prefixes": ["gpt-5.6-"]}
+            ],
+            route_buckets=[
+                {"label": "any", "hostnames": ["anyrouter.top"]},
+                {"label": "ooioo", "hostnames": ["ooioo.work"]},
+            ],
+        )
+        ordered = sorted(plan["verification_rows"], key=lambda row: row["new_name"])
+        self.assertEqual([row["id"] for row in ordered], [395, 394, 393, 396, 397])
+        self.assertEqual(plan["groups"][0]["display_account_ids"], [395])
+        self.assertEqual(ordered[0]["matched_model_buckets"], ["gpt-5.6"])
+        self.assertEqual(ordered[0]["matched_route_buckets"], ["any"])
+        self.assertEqual(ordered[-1]["new_name"], "zzzz-grok-account")
+
+    def test_model_priority_rejects_mixed_capability_route_group(self) -> None:
+        rows = [
+            account(
+                398,
+                "supported",
+                base_url="https://mixed.example/v1",
+                model_mapping={"gpt-5.6-sol": "gpt-5.6-sol"},
+            ),
+            account(
+                399,
+                "unsupported",
+                base_url="https://mixed.example/v1",
+                model_mapping={"gpt-5.5": "gpt-5.5"},
+            ),
+        ]
+        with self.assertRaisesRegex(planner.PlanError, "mixes model-priority tiers"):
+            planner.build_plan(
+                rows,
+                {},
+                model_buckets=[
+                    {"label": "gpt-5.6", "model_mapping_key_prefixes": ["gpt-5.6-"]}
+                ],
+            )
+
+    def test_model_bucket_scope_does_not_rank_openai_oauth(self) -> None:
+        rows = [
+            account(
+                401,
+                "oauth-with-mapping",
+                account_type="oauth",
+                model_mapping={"gpt-5.6-sol": "gpt-5.6-sol"},
+            ),
+            account(402, "oauth-without-mapping", account_type="oauth", model_mapping={}),
+        ]
+        plan = planner.build_plan(
+            rows,
+            {},
+            model_buckets=[
+                {
+                    "label": "gpt-5.6-apikey",
+                    "model_mapping_key_prefixes": ["gpt-5.6-"],
+                    "platforms": ["openai"],
+                    "account_types": ["apikey"],
+                }
+            ],
+        )
+        self.assertEqual(plan["group_count"], 1)
+        self.assertEqual(plan["groups"][0]["matched_model_buckets"], [])
+
+    def test_verify_detects_model_mapping_change(self) -> None:
+        rows = [
+            account(
+                400,
+                "model-guard",
+                base_url="https://guard.example/v1",
+                model_mapping={"gpt-5.6-sol": "gpt-5.6-sol"},
+            )
+        ]
+        plan = planner.build_plan(
+            rows,
+            {},
+            model_buckets=[
+                {"label": "gpt-5.6", "model_mapping_key_prefixes": ["gpt-5.6-"]}
+            ],
+        )
+        rows[0]["credentials"]["model_mapping"] = {"gpt-5.5": "gpt-5.5"}
+        result = planner.verify_plan(plan, rows, "before")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["errors"][0]["reason"], "model_mapping_changed")
+
+    def test_sort_policy_loads_and_binds_sha256(self) -> None:
+        payload = {
+            "schema_version": 1,
+            "model_buckets": [
+                {
+                    "label": "gpt-5.6",
+                    "model_mapping_key_prefixes": ["gpt-5.6-"],
+                    "platforms": ["OPENAI"],
+                    "account_types": ["APIKEY"],
+                }
+            ],
+            "route_buckets": [
+                {"label": "any", "hostnames": ["ANYROUTER.TOP."]},
+                {"label": "ooioo", "hostnames": ["ooioo.work"]},
+            ],
+            "order_markers": ["6945", "1223"],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "policy.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            policy = planner.resolve_sort_policy(str(path), False)
+        self.assertEqual(policy["route_buckets"][0]["hostnames"], ["anyrouter.top"])
+        self.assertEqual(policy["model_buckets"][0]["platforms"], ["openai"])
+        self.assertEqual(policy["model_buckets"][0]["account_types"], ["apikey"])
+        self.assertEqual(policy["order_markers"], ["6945", "1223"])
+        self.assertRegex(policy["sha256"], r"^[0-9a-f]{64}$")
+
+    def test_sort_policy_rejects_unknown_fields_and_duplicate_hosts(self) -> None:
+        invalid_payloads = [
+            {"schema_version": 1, "route_order": []},
+            {
+                "schema_version": 1,
+                "route_buckets": [
+                    {"label": "one", "hostnames": ["same.example"]},
+                    {"label": "two", "hostnames": ["SAME.EXAMPLE"]},
+                ],
+            },
+        ]
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "policy.json"
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                with self.assertRaises(planner.PlanError):
+                    planner.resolve_sort_policy(str(path), False)
+
+    def test_no_policy_ignores_explicit_path(self) -> None:
+        policy = planner.resolve_sort_policy("/definitely/not/present.json", True)
+        self.assertIsNone(policy["source"])
+        self.assertEqual(policy["route_buckets"], [])
+
     def test_compact_prefix_replan_does_not_duplicate_separator(self) -> None:
         plan = planner.build_plan(
             [account(44, "!00-any-6945", base_url="https://separator.example/v1")],
@@ -316,6 +499,20 @@ class RendererTests(unittest.TestCase):
             plan_path.write_text(json.dumps(plan), encoding="utf-8")
             with self.assertRaises(ValueError):
                 renderer.load_plan(str(plan_path))
+
+    def test_version_6_plan_remains_verifiable_and_renderable(self) -> None:
+        rows = [account(83, "legacy-v6", base_url="https://legacy.example/v1")]
+        plan = planner.build_plan(rows, {})
+        plan["schema_version"] = 6
+        for row in plan["verification_rows"]:
+            row.pop("model_mapping_sha256", None)
+        self.assertTrue(planner.verify_plan(plan, rows, "before")["ok"])
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "plan.json"
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            loaded, digest = renderer.load_plan(str(plan_path))
+            sql = renderer.render_sql(loaded, digest, "apply", "public")
+        self.assertIn("Direction: apply", sql)
 
 
 class FetcherTests(unittest.TestCase):

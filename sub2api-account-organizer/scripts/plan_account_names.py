@@ -20,13 +20,24 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 
-PLAN_VERSION = 6
+PLAN_VERSION = 7
+SUPPORTED_PLAN_VERSIONS = {6, PLAN_VERSION}
+POLICY_SCHEMA_VERSION = 1
 MAX_ACCOUNT_NAME_LENGTH = 100
 MANAGED_PREFIX_RE = re.compile(
     r"^(?:\[@url:[^\]\r\n]{1,64}\]\s+|!S2:\d{5}:\d{2}:[0-9a-f]{10}\s+|![0-9A-Z]{2}-)"
 )
 BASE36_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 PLATFORM_FIXED_PREFIXES = {"grok": "zzzz-"}
+DEFAULT_POLICY_PATH = Path(__file__).resolve().parents[1] / "local" / "sort-policy.json"
+POLICY_KEYS = {
+    "schema_version",
+    "exclude_platforms",
+    "order_markers",
+    "name_buckets",
+    "model_buckets",
+    "route_buckets",
+}
 
 
 class PlanError(ValueError):
@@ -267,6 +278,195 @@ def load_overrides(path: str | None) -> dict[int, str]:
     return result
 
 
+def policy_string_list(value: Any, field: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise PlanError(f"sort policy field {field!r} must be an array")
+    result: list[str] = []
+    seen: set[str] = set()
+    for index, item in enumerate(value):
+        if not isinstance(item, str) or not item.strip():
+            raise PlanError(f"sort policy field {field!r} has an invalid item at index {index}")
+        normalized = unicodedata.normalize("NFKC", item).strip()
+        folded = normalized.casefold()
+        if folded in seen:
+            raise PlanError(f"sort policy field {field!r} contains duplicate value {normalized!r}")
+        seen.add(folded)
+        result.append(normalized)
+    return result
+
+
+def policy_label(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise PlanError(f"sort policy field {field!r} must be a non-empty string")
+    normalized = unicodedata.normalize("NFKC", value).strip()
+    if len(normalized) > 32 or any(character in normalized for character in "\r\n\t"):
+        raise PlanError(f"sort policy field {field!r} has an invalid label")
+    return normalized
+
+
+def normalize_policy_hostname(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).strip().casefold().rstrip(".")
+    if not normalized or any(character in normalized for character in "/:@?#[]"):
+        raise PlanError(f"sort policy hostname must not contain a scheme, path, port, or credentials: {value!r}")
+    try:
+        ascii_host = normalized.encode("idna").decode("ascii")
+    except UnicodeError as exc:
+        raise PlanError(f"invalid sort policy hostname: {value!r}") from exc
+    if len(ascii_host) > 253 or not re.fullmatch(r"[a-z0-9.-]+", ascii_host):
+        raise PlanError(f"invalid sort policy hostname: {value!r}")
+    labels = ascii_host.split(".")
+    if any(not label or len(label) > 63 or label.startswith("-") or label.endswith("-") for label in labels):
+        raise PlanError(f"invalid sort policy hostname: {value!r}")
+    return ascii_host
+
+
+def normalize_model_buckets(value: Any) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise PlanError("model_buckets must be an array")
+    result: list[dict[str, Any]] = []
+    seen_labels: set[str] = set()
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise PlanError(f"model_buckets item {index} must be an object")
+        unknown = set(item) - {
+            "label",
+            "model_mapping_key_prefixes",
+            "platforms",
+            "account_types",
+        }
+        if unknown:
+            raise PlanError(f"model_buckets item {index} has unknown fields: {sorted(unknown)}")
+        label = policy_label(item.get("label"), f"model_buckets[{index}].label")
+        folded_label = label.casefold()
+        if folded_label in seen_labels:
+            raise PlanError(f"duplicate model bucket label: {label!r}")
+        seen_labels.add(folded_label)
+        prefixes = policy_string_list(
+            item.get("model_mapping_key_prefixes"),
+            f"model_buckets[{index}].model_mapping_key_prefixes",
+        )
+        if not prefixes:
+            raise PlanError(f"model bucket {label!r} must contain at least one key prefix")
+        platforms = [
+            platform.casefold()
+            for platform in policy_string_list(
+                item.get("platforms"), f"model_buckets[{index}].platforms"
+            )
+        ]
+        account_types = [
+            account_type.casefold()
+            for account_type in policy_string_list(
+                item.get("account_types"), f"model_buckets[{index}].account_types"
+            )
+        ]
+        result.append(
+            {
+                "label": label,
+                "model_mapping_key_prefixes": [prefix.casefold() for prefix in prefixes],
+                "platforms": platforms,
+                "account_types": account_types,
+            }
+        )
+    return result
+
+
+def normalize_route_buckets(value: Any) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise PlanError("route_buckets must be an array")
+    result: list[dict[str, Any]] = []
+    seen_labels: set[str] = set()
+    seen_hostnames: dict[str, str] = {}
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise PlanError(f"route_buckets item {index} must be an object")
+        unknown = set(item) - {"label", "hostnames"}
+        if unknown:
+            raise PlanError(f"route_buckets item {index} has unknown fields: {sorted(unknown)}")
+        label = policy_label(item.get("label"), f"route_buckets[{index}].label")
+        folded_label = label.casefold()
+        if folded_label in seen_labels:
+            raise PlanError(f"duplicate route bucket label: {label!r}")
+        seen_labels.add(folded_label)
+        hostnames = [
+            normalize_policy_hostname(host)
+            for host in policy_string_list(item.get("hostnames"), f"route_buckets[{index}].hostnames")
+        ]
+        if not hostnames:
+            raise PlanError(f"route bucket {label!r} must contain at least one hostname")
+        for hostname in hostnames:
+            previous = seen_hostnames.get(hostname)
+            if previous is not None:
+                raise PlanError(
+                    f"route hostname {hostname!r} appears in both {previous!r} and {label!r}"
+                )
+            seen_hostnames[hostname] = label
+        result.append({"label": label, "hostnames": hostnames})
+    return result
+
+
+def empty_sort_policy() -> dict[str, Any]:
+    return {
+        "schema_version": POLICY_SCHEMA_VERSION,
+        "exclude_platforms": [],
+        "order_markers": [],
+        "name_buckets": [],
+        "model_buckets": [],
+        "route_buckets": [],
+        "source": None,
+        "sha256": None,
+    }
+
+
+def load_sort_policy(path: Path) -> dict[str, Any]:
+    raw_bytes = path.read_bytes()
+    raw = json.loads(raw_bytes)
+    if not isinstance(raw, dict):
+        raise PlanError("sort policy must be a JSON object")
+    unknown = set(raw) - POLICY_KEYS
+    if unknown:
+        raise PlanError(f"sort policy has unknown fields: {sorted(unknown)}")
+    if raw.get("schema_version") != POLICY_SCHEMA_VERSION:
+        raise PlanError(f"sort policy schema_version must be {POLICY_SCHEMA_VERSION}")
+    policy = empty_sort_policy()
+    policy.update(
+        {
+            "exclude_platforms": normalize_platforms(
+                policy_string_list(raw.get("exclude_platforms"), "exclude_platforms")
+            ),
+            "order_markers": normalize_markers(
+                policy_string_list(raw.get("order_markers"), "order_markers")
+            ),
+            "name_buckets": normalize_markers(
+                policy_string_list(raw.get("name_buckets"), "name_buckets")
+            ),
+            "model_buckets": normalize_model_buckets(raw.get("model_buckets")),
+            "route_buckets": normalize_route_buckets(raw.get("route_buckets")),
+            "source": str(path.resolve()),
+            "sha256": hashlib.sha256(raw_bytes).hexdigest(),
+        }
+    )
+    return policy
+
+
+def resolve_sort_policy(path: str | None, no_policy: bool) -> dict[str, Any]:
+    if no_policy:
+        return empty_sort_policy()
+    target = Path(path).expanduser() if path else DEFAULT_POLICY_PATH
+    if not target.exists():
+        if path:
+            raise PlanError(f"explicit sort policy does not exist: {target}")
+        return empty_sort_policy()
+    if not target.is_file():
+        raise PlanError(f"sort policy is not a regular file: {target}")
+    return load_sort_policy(target)
+
+
 def marker_rank(name: str, order_markers: list[str]) -> tuple[int, list[str]]:
     folded = unicodedata.normalize("NFKC", name).casefold()
     matches = [
@@ -310,6 +510,69 @@ def name_bucket_rank(name: str, name_buckets: list[str]) -> tuple[int, list[str]
     return first, matches
 
 
+def model_mapping_guard(account: dict[str, Any]) -> str:
+    mapping = string_map(string_map(account.get("credentials")).get("model_mapping"))
+    encoded = json.dumps(mapping, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def model_bucket_rank(
+    account: dict[str, Any], model_buckets: list[dict[str, Any]]
+) -> tuple[int, list[str]]:
+    mapping = string_map(string_map(account.get("credentials")).get("model_mapping"))
+    platform = string_value(account.get("platform")).casefold()
+    account_type = string_value(account.get("type")).casefold()
+    usable_keys = [
+        unicodedata.normalize("NFKC", key).casefold()
+        for key, target in mapping.items()
+        if isinstance(key, str) and isinstance(target, str) and target.strip()
+    ]
+    matches = [
+        bucket["label"]
+        for bucket in model_buckets
+        if (not bucket["platforms"] or platform in bucket["platforms"])
+        and (not bucket["account_types"] or account_type in bucket["account_types"])
+        and any(
+            key.startswith(prefix)
+            for key in usable_keys
+            for prefix in bucket["model_mapping_key_prefixes"]
+        )
+    ]
+    if not matches:
+        return len(model_buckets), []
+    matched_labels = {label.casefold() for label in matches}
+    first = min(
+        index
+        for index, bucket in enumerate(model_buckets)
+        if bucket["label"].casefold() in matched_labels
+    )
+    return first, matches
+
+
+def route_bucket_rank(
+    endpoint_key: str, route_buckets: list[dict[str, Any]]
+) -> tuple[int, list[str]]:
+    try:
+        hostname = urlsplit(endpoint_key).hostname
+    except ValueError:
+        hostname = None
+    normalized_host = hostname.casefold().rstrip(".") if hostname else ""
+    matches = [
+        bucket["label"]
+        for bucket in route_buckets
+        if normalized_host and normalized_host in bucket["hostnames"]
+    ]
+    if not matches:
+        return len(route_buckets), []
+    matched_labels = {label.casefold() for label in matches}
+    first = min(
+        index
+        for index, bucket in enumerate(route_buckets)
+        if bucket["label"].casefold() in matched_labels
+    )
+    return first, matches
+
+
 def base36_digit(value: int) -> str:
     if not 0 <= value < len(BASE36_ALPHABET):
         raise PlanError(f"compact ordering value out of range: {value}")
@@ -322,10 +585,16 @@ def build_plan(
     exclude_platforms: list[str] | None = None,
     order_markers: list[str] | None = None,
     name_buckets: list[str] | None = None,
+    model_buckets: list[dict[str, Any]] | None = None,
+    route_buckets: list[dict[str, Any]] | None = None,
+    policy_source: str | None = None,
+    policy_sha256: str | None = None,
 ) -> dict[str, Any]:
     excluded_platforms = normalize_platforms(exclude_platforms)
     markers = normalize_markers(order_markers)
     buckets = normalize_markers(name_buckets)
+    model_rules = normalize_model_buckets(model_buckets)
+    route_rules = normalize_route_buckets(route_buckets)
     by_id: dict[int, dict[str, Any]] = {}
     ignored_deleted: list[int] = []
     for account in accounts:
@@ -370,6 +639,10 @@ def build_plan(
                 "matched_markers": set(),
                 "bucket_ranks": set(),
                 "matched_name_buckets": set(),
+                "model_bucket_ranks": set(),
+                "matched_model_buckets": set(),
+                "route_bucket_ranks": set(),
+                "matched_route_buckets": set(),
                 "fixed_prefix": fixed_prefix,
             },
         )
@@ -384,10 +657,16 @@ def build_plan(
             raise PlanError(f"account {aid} has no base name after removing the managed prefix")
         item_marker_rank, item_matches = marker_rank(base_name, markers)
         item_bucket_rank, bucket_matches = name_bucket_rank(base_name, buckets)
+        item_model_rank, model_matches = model_bucket_rank(account, model_rules)
+        item_route_rank, route_matches = route_bucket_rank(endpoint_key, route_rules)
         group["marker_ranks"].add(item_marker_rank)
         group["matched_markers"].update(item_matches)
         group["bucket_ranks"].add(item_bucket_rank)
         group["matched_name_buckets"].update(bucket_matches)
+        group["model_bucket_ranks"].add(item_model_rank)
+        group["matched_model_buckets"].update(model_matches)
+        group["route_bucket_ranks"].add(item_route_rank)
+        group["matched_route_buckets"].update(route_matches)
         candidates.append(
             {
                 "id": aid,
@@ -402,32 +681,48 @@ def build_plan(
                 "matched_markers": item_matches,
                 "name_bucket_rank": item_bucket_rank,
                 "matched_name_buckets": bucket_matches,
+                "model_bucket_rank": item_model_rank,
+                "matched_model_buckets": model_matches,
+                "route_bucket_rank": item_route_rank,
+                "matched_route_buckets": route_matches,
+                "model_mapping_sha256": model_mapping_guard(account),
             }
         )
+
+    if model_rules:
+        for group in groups.values():
+            if len(group["model_bucket_ranks"]) > 1:
+                raise PlanError(
+                    f"route group {group['label']!r} mixes model-priority tiers; "
+                    "global model priority and URL continuity cannot both be preserved"
+                )
 
     ordered_groups = sorted(
         groups.values(),
         key=lambda item: (
             item["fixed_prefix"] is not None,
             item["fixed_prefix"] or "",
+            min(item["model_bucket_ranks"], default=len(model_rules)),
+            min(item["route_bucket_ranks"], default=len(route_rules)),
             min(item["bucket_ranks"], default=len(buckets)),
             min(item["marker_ranks"], default=len(markers)),
             item["label"].casefold(),
             item["group_key_sha256"],
         ),
     )
-    if markers and len(ordered_groups) > len(BASE36_ALPHABET):
+    compact_ordering = bool(markers or buckets or model_rules or route_rules)
+    if compact_ordering and len(ordered_groups) > len(BASE36_ALPHABET):
         raise PlanError(
-            f"compact marker ordering supports at most {len(BASE36_ALPHABET)} URL groups; "
+            f"compact ordering supports at most {len(BASE36_ALPHABET)} URL groups; "
             f"found {len(ordered_groups)}"
         )
-    if markers and len(markers) >= len(BASE36_ALPHABET):
+    if compact_ordering and len(markers) >= len(BASE36_ALPHABET):
         raise PlanError(
             f"compact marker ordering supports at most {len(BASE36_ALPHABET) - 1} markers; "
             f"found {len(markers)}"
         )
     item_order_count = (len(buckets) + 1) * (len(markers) + 1)
-    if markers and item_order_count > len(BASE36_ALPHABET):
+    if compact_ordering and item_order_count > len(BASE36_ALPHABET):
         raise PlanError(
             "compact ordering has too many name-bucket/marker combinations: "
             f"{item_order_count} > {len(BASE36_ALPHABET)}"
@@ -438,11 +733,27 @@ def build_plan(
         group["display_order"] = display_order
         group["name_bucket_rank"] = min(group.pop("bucket_ranks"), default=len(buckets))
         group["marker_rank"] = min(group.pop("marker_ranks"), default=len(markers))
+        group["model_bucket_rank"] = min(
+            group.pop("model_bucket_ranks"), default=len(model_rules)
+        )
+        group["route_bucket_rank"] = min(
+            group.pop("route_bucket_ranks"), default=len(route_rules)
+        )
         group["matched_markers"] = [
             marker for marker in markers if marker in group["matched_markers"]
         ]
         group["matched_name_buckets"] = [
             bucket for bucket in buckets if bucket in group["matched_name_buckets"]
+        ]
+        group["matched_model_buckets"] = [
+            bucket["label"]
+            for bucket in model_rules
+            if bucket["label"] in group["matched_model_buckets"]
+        ]
+        group["matched_route_buckets"] = [
+            bucket["label"]
+            for bucket in route_rules
+            if bucket["label"] in group["matched_route_buckets"]
         ]
 
     rows: list[dict[str, Any]] = []
@@ -453,7 +764,7 @@ def build_plan(
         base_name = candidate["base_name"]
         if candidate["fixed_prefix"]:
             prefix = candidate["fixed_prefix"]
-        elif markers:
+        elif compact_ordering:
             combined_item_order = (
                 candidate["name_bucket_rank"] * (len(markers) + 1)
                 + candidate["marker_rank"]
@@ -488,6 +799,11 @@ def build_plan(
                 "matched_markers": candidate["matched_markers"],
                 "name_bucket_rank": candidate["name_bucket_rank"],
                 "matched_name_buckets": candidate["matched_name_buckets"],
+                "model_bucket_rank": candidate["model_bucket_rank"],
+                "matched_model_buckets": candidate["matched_model_buckets"],
+                "route_bucket_rank": candidate["route_bucket_rank"],
+                "matched_route_buckets": candidate["matched_route_buckets"],
+                "model_mapping_sha256": candidate["model_mapping_sha256"],
                 "classification_source": candidate["classification_source"],
                 "fixed_prefix": candidate["fixed_prefix"],
                 "guard_sha256": account_guard(account),
@@ -496,13 +812,22 @@ def build_plan(
         )
 
     group_list = ordered_groups
+    display_ids_by_group: dict[str, list[int]] = {}
+    for row in sorted(rows, key=lambda item: (item["new_name"], item["id"])):
+        display_ids_by_group.setdefault(row["group_key_sha256"], []).append(row["id"])
     for group in group_list:
         group["account_ids"].sort()
+        group["display_account_ids"] = display_ids_by_group[group["group_key_sha256"]]
         group["count"] = len(group["account_ids"])
 
     changes = [row for row in rows if row["old_name"] != row["new_name"]]
     source_projection = [
-        {"id": row["id"], "old_name": row["old_name"], "guard_sha256": row["guard_sha256"]}
+        {
+            "id": row["id"],
+            "old_name": row["old_name"],
+            "guard_sha256": row["guard_sha256"],
+            "model_mapping_sha256": row["model_mapping_sha256"],
+        }
         for row in rows
     ]
     source_hash = hashlib.sha256(
@@ -519,6 +844,10 @@ def build_plan(
         "excluded_platforms": excluded_platforms,
         "order_markers": markers,
         "name_buckets": buckets,
+        "model_buckets": model_rules,
+        "route_buckets": route_rules,
+        "policy_source": policy_source,
+        "policy_sha256": policy_sha256,
         "platform_fixed_prefixes": dict(sorted(PLATFORM_FIXED_PREFIXES.items())),
         "changed_count": len(changes),
         "group_count": len(group_list),
@@ -526,7 +855,7 @@ def build_plan(
         "source_sha256": source_hash,
         "managed_prefix": (
             "!<URL组base36一位><组内标记base36一位>-"
-            if markers
+            if compact_ordering
             else "[@url:<safe-label>:<url-hash-10>] "
         ),
         "groups": group_list,
@@ -540,7 +869,7 @@ def verify_plan(plan: dict[str, Any], accounts: list[dict[str, Any]], expect: st
         raise PlanError(f"unsupported verification expectation: {expect!r}")
     verification_rows = plan.get("verification_rows")
     if (
-        plan.get("schema_version") != PLAN_VERSION
+        plan.get("schema_version") not in SUPPORTED_PLAN_VERSIONS
         or not isinstance(plan.get("changes"), list)
         or not isinstance(verification_rows, list)
     ):
@@ -581,6 +910,11 @@ def verify_plan(plan: dict[str, Any], accounts: list[dict[str, Any]], expect: st
         if account_guard(account) != row.get("guard_sha256"):
             errors.append({"id": aid, "reason": "protected_fields_changed"})
             continue
+        if plan.get("schema_version") >= 7 and model_mapping_guard(account) != row.get(
+            "model_mapping_sha256"
+        ):
+            errors.append({"id": aid, "reason": "model_mapping_changed"})
+            continue
         if row.get("classification_source") != "manual":
             try:
                 endpoint_key, _ = effective_endpoint(account, by_id, {})
@@ -597,12 +931,25 @@ def verify_plan(plan: dict[str, Any], accounts: list[dict[str, Any]], expect: st
 
 def command_plan(args: argparse.Namespace) -> int:
     accounts = unwrap_accounts(read_json(args.input))
+    policy = resolve_sort_policy(args.policy, args.no_policy)
     plan = build_plan(
         accounts,
         load_overrides(args.overrides),
-        exclude_platforms=args.exclude_platform,
-        order_markers=args.order_marker,
-        name_buckets=args.name_bucket,
+        exclude_platforms=(
+            args.exclude_platform
+            if args.exclude_platform is not None
+            else policy["exclude_platforms"]
+        ),
+        order_markers=(
+            args.order_marker if args.order_marker is not None else policy["order_markers"]
+        ),
+        name_buckets=(
+            args.name_bucket if args.name_bucket is not None else policy["name_buckets"]
+        ),
+        model_buckets=policy["model_buckets"],
+        route_buckets=policy["route_buckets"],
+        policy_source=policy["source"],
+        policy_sha256=policy["sha256"],
     )
     write_json_0600(args.output, plan)
     summary = {
@@ -612,6 +959,8 @@ def command_plan(args: argparse.Namespace) -> int:
         "group_count": plan["group_count"],
         "truncated_count": sum(1 for row in plan["changes"] if row["truncated"]),
         "output": str(Path(args.output).resolve()),
+        "policy_source": plan["policy_source"],
+        "policy_sha256": plan["policy_sha256"],
     }
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
     return 0
@@ -633,22 +982,29 @@ def build_parser() -> argparse.ArgumentParser:
     plan_parser.add_argument("--input", required=True, help="redacted accounts JSON, or - for stdin")
     plan_parser.add_argument("--output", required=True, help="plan JSON path (written mode 0600)")
     plan_parser.add_argument("--overrides", help="optional JSON mapping account ids to manual labels")
+    policy_group = plan_parser.add_mutually_exclusive_group()
+    policy_group.add_argument("--policy", help="explicit JSON sort policy path")
+    policy_group.add_argument(
+        "--no-policy",
+        action="store_true",
+        help="ignore the optional default local/sort-policy.json",
+    )
     plan_parser.add_argument(
         "--exclude-platform",
         action="append",
-        default=[],
+        default=None,
         help="platform to leave unchanged; repeatable",
     )
     plan_parser.add_argument(
         "--order-marker",
         action="append",
-        default=[],
+        default=None,
         help="name substring order for URL groups and members; repeatable",
     )
     plan_parser.add_argument(
         "--name-bucket",
         action="append",
-        default=[],
+        default=None,
         help="higher-level original-name substring bucket; repeatable",
     )
     plan_parser.set_defaults(func=command_plan)
