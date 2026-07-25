@@ -8,6 +8,8 @@
 4. 开发循环可以只重跑 `R0 + 受影响 case`；最终 SHA 必须跑所有选中 case。同一请求可同时支撑多个 case，但每个 case 的断言和证据引用必须明确。
 5. 每例记录：`case_id`、SHA、image digest、配置/fixture 指纹、UTC 起止、执行器、请求类别、预期、实际、日志窗、状态、证据路径。
 
+`0.1.165` 复盘显示，33 个选中 case 中有 1 个候选身份证据、2 个自动 debug adapter、2 个 rollback compatibility 证据和 28 个结构化 manual evidence。以后需要完善的方向是让每个 manual case 明确标记“CI/静态审查、合成 debug、真实 provider canary 或切换后确认”，并为部署 lifecycle 与 pool 故障路径提供可重放的专用 adapter；case 数量或 `passed` 状态本身不代表每条路径都经过真实上游请求。
+
 用 `run-debug-matrix.sh` 固化记录：running attempt 可续接；failed/blocked 后必须显式新 attempt。开发循环用 `mode=dev`；最终 SHA 用 `mode=release`，每个 passed case 必须提供证据文件，R0-7/log executor 必须提供任务归属的 debug 日志窗，skip 必须有原因。只有 `seal` 生成且经 `verify-release-evidence.sh` 复核的 `release-evidence.json` 可进入 promotion 和生产 apply。
 
 先用 `run-debug-adapter.sh run-ready` 串行处理全部可执行项。manual/rollback case 首轮会落为 `needs_manual`；只要其他选中 case 尚未全部 `passed/skipped_not_triggered`，R0-7 就保持 pending，单 case release `run` 也不能绕过。补齐结构化 evidence 后再次执行 `run-ready`，让 R0-7 扫描最终 canary 窗；若旧 run 的 R0-7 已过早 passed，runner 自动创建最终 attempt。seal/verify 用 adapter checkpoint 的 `log_window.until` 确认覆盖其他最终 passed attempt。跨 run 禁止并发争用同一 debug Compose/fixture。catalog 有 44 个可选场景，但计划默认只选 R0 与实际触发项；当前仅 R0-1、R0-2、R0-7 有自动 adapter，其他被选场景在 case 脚本完成真实审计前保持 manual。自动 passed 必须绑定同 run/case/attempt 的 adapter checkpoint、evidence/log hash；manual passed 必须使用 `kind=manual-verification` 的结构化 JSON。runner 不接受任意命令、URL、日志路径或服务名，不确定的真实请求禁止自动重放。
@@ -23,7 +25,7 @@ release 模式中三类证据有机器契约：R0-1 必须是 `candidate-identit
 | L2 | 隔离 debug 真实 canary | 真实上游、账号配置、迁移、日志和运行时组合 |
 | L3 | 官方 Codex 客户端 | metadata、工具、模型切换、Router 和完整多轮语义 |
 
-CI 绿不能替代 L2/L3；L2 的 raw HTTP 也不能冒充官方 Codex L3。
+CI 绿不能替代 L2/L3；L2 的 raw HTTP 也不能冒充官方 Codex L3。部署层的 Docker lifecycle 也属于 L2/R2 运行证据，不能由应用 health 或静态 shell contract 代替。
 
 如果生产活跃 provider 没有 debug-only 身份，不能复制生产 token 或让同一 OAuth refresh owner 双端运行。此时允许把切换前 case 证据收束为精确 SHA CI、同 SHA 合成协议/runtime、官方客户端 metadata、生产只读 active inventory 和已证明 image rollback；切换后必须在生产现有链路上为每个活跃 provider 做一次有意义 canary 并检查日志。该例外只解决身份隔离，不放宽 migration、schema、错误终态、sticky/pool 或回退门禁。
 
@@ -32,13 +34,19 @@ CI 绿不能替代 L2/L3；L2 的 raw HTTP 也不能冒充官方 Codex L3。
 | ID | 场景 | 核心断言 |
 | --- | --- | --- |
 | R0-1 | 候选身份 | CI run、`debug-<12sha>`、revision/ref label、digest、容器 image ID 全部绑定最终 SHA |
-| R0-2 | 候选启动与运行绑定 | 容器使用精确候选镜像，健康且 loopback `/health` 正常；迁移完整性由 R1-M1/M2 与 R0-6 人工关联审查兜底 |
+| R0-2 | 候选启动与运行绑定 | 容器使用精确候选镜像，`Config.Entrypoint`/`Config.Cmd`、健康和 loopback `/health` 均符合部署合同；迁移完整性由 R1-M1/M2 与 R0-6 人工关联审查兜底 |
 | R0-3 | 基础业务 | health、鉴权、API key、账号/分组/设置只读、合成余额和 fixture manifest 正常 |
 | R0-4 | Responses | 真实流式/非流式请求有合法 output、usage、completed 终态和合理首包 |
 | R0-5 | Chat/错误 | 普通 Chat 路径和一条预设负例形状正确，不发生错误分类串线 |
 | R0-6 | 职责双向回归与关联日志审查 | 每个职责及上游默认流程通过；预期负例按 request 关联，且无未解释 4xx/5xx、终态缺失或错误串线 |
 | R0-7 | 致命日志模式门禁 | 完整 canary 窗内无 panic、fatal、迁移/checksum、OOM 或 `response.failed`；finish、seal、verify 都会重扫 |
 | R0-8 | 回退兼容 | 候选迁移后旧应用镜像可以健康启动并完成核心只读路径；否则禁止 image-only rollback |
+
+## 部署生命周期专项
+
+只要候选或生产部署输入触及 Compose、entrypoint、command、network、代理、健康门或进程参数，就在 release seal 前创建独立、无凭据、非生产 Compose project 的 lifecycle probe，并把报告绑定到 R2-2。正例必须按以下顺序执行并记录每个状态：`up --no-start --force-recreate` -> `Config.Entrypoint/Cmd` 检查 -> `start`/有界 gate -> 运行态 `network connect` -> 精确 IP/代理可达性 -> 原 entrypoint 后的应用命令 -> health。负例至少包括空 CMD、只做停态 attach 不启动、错误 IP 和 attach 超时；负例必须证明不会进入迁移或应用进程。
+
+release evidence 需要保存 probe report、Compose/config 指纹、容器进程参数、网络地址、日志窗和 rollback 同构结果。静态合同、dry-run、停态 inspect 或“成功 apply 后才做的临时探针”只能作为后续诊断资料，不能替代发布门禁。若没有 debug-only provider 身份，仍可采用窄化闭环，但必须明确区分 CI/合成 debug、部署 lifecycle 和切换后官方 Codex canary 三类证据。
 
 ## 长文本、Compact 与上下文
 
@@ -119,6 +127,8 @@ CI 绿不能替代 L2/L3；L2 的 raw HTTP 也不能冒充官方 Codex L3。
 - `R1-H2`：池模式同账号重试覆盖裸 5xx 与 200+SSE failed；核验服务端实际尝试数和客户端 N/总预算体验。
 - `R1-H3`：snapshot/outbox/cache 重建无丢事件、重复风暴或多实例不一致。
 
+池模式的错误路径需要同时核对上游替代关系：OpenAI 的 `521db6869` 只对账号配置的 retryable 状态跳过 model cooldown，Grok 的 `51f354f5c` 只在 pool 模式下避免 5xx 临时下线；不得恢复“整个 pool 一律绕过 cooldown”的旧宽规则。当前仍需验证的池专属能力包括账号级 retry count/status codes、SSE `response.failed`/trailing 处理、首包前 failover、首包后不换流和 first-output 预算。后续需要完善的验证包括：dev 模式的可控 5xx/200+SSE `response.failed` 注入、sticky 逃逸后是否重新选回旧账号、scheduler 是否能在不依赖旧 `pool_mode` projection 时正确识别池，以及 Router/Sub2 双层重试的总预算。上述 fault-injection 只进入独立 dev evidence，不进入 release seal。
+
 ## 计费、Probe 与后台任务
 
 触发：usage、billing、quota、probe、refresh、scheduler outbox、cleanup 或后台 worker。
@@ -133,7 +143,7 @@ CI 绿不能替代 L2/L3；L2 的 raw HTTP 也不能冒充官方 Codex L3。
 
 - `R1-J1`：前端改动至少由 CI typecheck、关键 vitest 与相关视图契约覆盖；账号 extra UI 更新必须保持完整 map。
 - `R2-1`：认证/OAuth/API key 改动覆盖回调、session、权限和限速。
-- `R2-2`：部署/Compose/workflow 改动覆盖 shell tests、loopback、project name、只 pull app、PGDATA、数据卷和 Watchtower 边界。
+- `R2-2`：部署/Compose/workflow 改动覆盖 shell tests、loopback、project name、只 pull app、PGDATA、数据卷和 Watchtower 边界；触及 entrypoint/command/network/代理时，还必须有隔离 Docker lifecycle probe。
 - `R2-3`：Claude/Gemini/其他 provider 只在已配置且相关路径受影响时做最小真实 canary。
 
 ## 日志判定

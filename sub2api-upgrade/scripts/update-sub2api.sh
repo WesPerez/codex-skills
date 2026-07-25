@@ -6,11 +6,19 @@ umask 077
 readonly DEPLOY_DIR="/root/sub2api-prod-deploy"
 readonly COMPOSE_FILE="$DEPLOY_DIR/docker-compose.yml"
 readonly ENV_FILE="$DEPLOY_DIR/.env"
+readonly NETWORK_ENTRYPOINT_FILE="$DEPLOY_DIR/network-entrypoint.sh"
 readonly RUN_ROOT="/root/backups/sub2api/upgrade-runs"
 readonly APPLY_LOCK_FILE="/run/lock/sub2api-upgrade.lock"
 readonly APP_IMAGE_REPOSITORY="ghcr.io/wesperez/sub2api"
 readonly APP_IMAGE="$APP_IMAGE_REPOSITORY:mine"
 readonly APP_HEALTH_URL="http://127.0.0.1:13080/health"
+readonly HOST_PROXY_NETWORK="bridge"
+readonly HOST_PROXY_IPV4="172.17.0.2"
+readonly HOST_PROXY_ENDPOINT="172.17.0.1"
+readonly HOST_PROXY_PORT="10818"
+# Keep the live attach window shorter than network-entrypoint.sh's 30-second gate
+# so a failed candidate can be replaced before restart policy gets involved.
+readonly HOST_PROXY_ATTACH_TIMEOUT_SECONDS=25
 readonly ROUTER_UPSTREAM_CONFIG="/etc/nginx/conf.d/codex-unified-router-upstream.conf"
 readonly PUBLIC_HOST="wooai.cc.cd"
 readonly HEALTH_TIMEOUT_SECONDS=180
@@ -46,6 +54,7 @@ ROLLOUT_STARTED=0
 ROLLOUT_COMPLETE=0
 FAILURE_HANDLED=0
 SUCCESS_COMMIT_STARTED=0
+APPLICATION_RECREATE_STARTED=0
 
 usage() {
   cat <<'USAGE'
@@ -57,9 +66,9 @@ Usage:
     --rollback-image-safe
 
 Default mode is read-only preflight. Apply mode only updates the production
-sub2api service after it verifies a published mine image, creates a PostgreSQL
-  sealed debug evidence, exact-digest promotion receipt, a PostgreSQL dump, and
-  the currently running application image for rollback.
+sub2api service after it verifies a published mine image, sealed debug evidence,
+an exact-digest promotion receipt, a PostgreSQL dump, and the currently running
+application image for rollback.
 USAGE
 }
 
@@ -110,6 +119,85 @@ repo_digests_match() {
 
 container_health() {
   docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$1"
+}
+
+container_has_host_proxy_network() {
+  docker inspect "$1" | jq -e --arg network "$HOST_PROXY_NETWORK" --arg ipv4 "$HOST_PROXY_IPV4" '
+    .[0].NetworkSettings.Networks[$network].IPAddress
+    | . == $ipv4
+  ' >/dev/null
+}
+
+container_host_proxy_ipv4() {
+  docker inspect "$1" | jq -r --arg network "$HOST_PROXY_NETWORK" \
+    '.[0].NetworkSettings.Networks[$network].IPAddress // empty'
+}
+
+container_has_expected_process_spec() {
+  docker inspect "$1" | jq -e '
+    .[0].Config.Entrypoint == ["/app/network-entrypoint.sh"]
+    and .[0].Config.Cmd == ["/app/sub2api"]
+  ' >/dev/null
+}
+
+host_proxy_network_is_available_for() {
+  local container_id
+  container_id="$(docker inspect -f '{{.Id}}' "$1")" || return 1
+  docker network inspect "$HOST_PROXY_NETWORK" | jq -e --arg container "$container_id" '
+    (.[0].Containers // {} | keys) as $containers
+    | ($containers | length) == 0
+      or (($containers | length) == 1 and $containers[0] == $container)
+  ' >/dev/null
+}
+
+host_proxy_is_reachable() {
+  docker exec "$1" nc -z -w 3 "$HOST_PROXY_ENDPOINT" "$HOST_PROXY_PORT" >/dev/null 2>&1
+}
+
+recreate_application() {
+  local image="$1"
+  local container
+  local actual_ip
+  local connect_error=""
+  local deadline
+  local status
+
+  container="$(compose ps --all -q sub2api)" || return 1
+  [[ -n "$container" ]] || return 1
+  host_proxy_network_is_available_for "$container" || return 1
+  # The built-in bridge rejects --ip; exact allocation is checked immediately
+  # after live connect while the bridge is guaranteed to be empty or ours.
+  APPLICATION_RECREATE_STARTED=1
+  compose_with_image "$image" up --no-start --no-deps --force-recreate --pull never sub2api || return 1
+  container="$(compose ps --all -q sub2api)" || return 1
+  [[ -n "$container" ]] || return 1
+  container_has_expected_process_spec "$container" || return 1
+  compose start sub2api || return 1
+  deadline=$((SECONDS + HOST_PROXY_ATTACH_TIMEOUT_SECONDS))
+  while (( SECONDS < deadline )); do
+    container_has_host_proxy_network "$container" && break
+    status="$(docker inspect -f '{{.State.Status}}' "$container" 2>/dev/null || true)"
+    [[ "$status" == "running" ]] || return 1
+    actual_ip="$(container_host_proxy_ipv4 "$container" 2>/dev/null || true)"
+    if [[ -n "$actual_ip" && "$actual_ip" != "$HOST_PROXY_IPV4" ]]; then
+      host_proxy_network_is_available_for "$container" || return 1
+      if ! connect_error="$(docker network disconnect "$HOST_PROXY_NETWORK" "$container" 2>&1)"; then
+        sleep 0.2
+        continue
+      fi
+    fi
+    if ! connect_error="$(docker network connect --gw-priority -1 "$HOST_PROXY_NETWORK" "$container" 2>&1)"; then
+      :
+    fi
+    container_has_host_proxy_network "$container" && break
+    sleep 0.2
+  done
+  if ! container_has_host_proxy_network "$container"; then
+    actual_ip="$(container_host_proxy_ipv4 "$container" 2>/dev/null || true)"
+    warn "host-proxy attach failed: actual_ip=${actual_ip:-missing} last_error=${connect_error:-none}"
+    return 1
+  fi
+  host_proxy_network_is_available_for "$container" || return 1
 }
 
 last_manifest_value() {
@@ -209,7 +297,7 @@ on_exit() {
   local status="$1"
   trap - EXIT
   trap '' INT TERM
-  if (( status != 0 && ROLLOUT_STARTED == 1 && ROLLOUT_COMPLETE == 0 && FAILURE_HANDLED == 0 )); then
+  if (( status != 0 && ROLLOUT_STARTED == 1 && ROLLOUT_COMPLETE == 0 && FAILURE_HANDLED == 0 && APPLICATION_RECREATE_STARTED == 1 )); then
     if (( SUCCESS_COMMIT_STARTED == 1 )) && [[ -n "$RUN_DIR" && -f "$RUN_DIR/manifest.env" ]] \
       && [[ "$(last_manifest_value status "$RUN_DIR/manifest.env")" == "passed_pending_finalization" ]] \
       && [[ "$(docker image inspect -f '{{.Id}}' "$APP_IMAGE" 2>/dev/null || true)" == "$CANDIDATE_IMAGE_ID" ]] \
@@ -300,6 +388,9 @@ check_static_layout() {
   [[ -d "$DEPLOY_DIR" ]] || die "production deployment directory is missing: $DEPLOY_DIR"
   [[ -f "$COMPOSE_FILE" ]] || die "production Compose file is missing: $COMPOSE_FILE"
   [[ -f "$ENV_FILE" ]] || die "production environment file is missing: $ENV_FILE"
+  [[ -f "$NETWORK_ENTRYPOINT_FILE" && ! -L "$NETWORK_ENTRYPOINT_FILE" && -x "$NETWORK_ENTRYPOINT_FILE" ]] \
+    || die "production host-proxy entrypoint gate is missing, linked, or not executable"
+  sh -n "$NETWORK_ENTRYPOINT_FILE" || die "production host-proxy entrypoint gate has invalid shell syntax"
   [[ "$(realpath -e "$DEPLOY_DIR")" == "$DEPLOY_DIR" ]] || die "deployment directory is not the expected canonical path"
   grep -Eq '^name:[[:space:]]*sub2api-prod[[:space:]]*$' "$COMPOSE_FILE" || die "Compose project is not sub2api-prod"
   compose config --quiet >/dev/null || die "Compose configuration is invalid"
@@ -307,6 +398,24 @@ check_static_layout() {
   local configured_image
   configured_image="$(compose config --format json | jq -r '.services.sub2api.image')"
   [[ "$configured_image" == "$APP_IMAGE" ]] || die "sub2api image must be exactly $APP_IMAGE, got $configured_image"
+  [[ "$(docker network inspect -f '{{index .Options "com.docker.network.bridge.default_bridge"}}' "$HOST_PROXY_NETWORK" 2>/dev/null)" == "true" ]] \
+    || die "required Docker host-proxy bridge is missing or is not the built-in bridge"
+  compose config --format json | jq -e '.services.sub2api.networks | keys == ["default"]' >/dev/null \
+    || die "sub2api Compose networks must remain default-only; the host-proxy bridge is attached live after start"
+  docker network inspect "$HOST_PROXY_NETWORK" | jq -e '
+    any(.[0].IPAM.Config[]?; .Subnet == "172.17.0.0/16" and .Gateway == "172.17.0.1")
+  ' >/dev/null || die "required host-proxy bridge IPAM is not 172.17.0.0/16 via 172.17.0.1"
+  compose config --format json | jq -e '
+    .services.sub2api.entrypoint == ["/app/network-entrypoint.sh"]
+    and .services.sub2api.command == ["/app/sub2api"]
+    and any(.services.sub2api.volumes[];
+      .type == "bind" and .source == "/root/sub2api-prod-deploy/network-entrypoint.sh"
+      and .target == "/app/network-entrypoint.sh" and .read_only == true)
+  ' >/dev/null || die "sub2api Compose does not preserve the application command and bind the required host-proxy entrypoint gate read-only"
+  grep -Fq 'sub2api-host-proxy-gate-v2' "$NETWORK_ENTRYPOINT_FILE" \
+    || die "production host-proxy entrypoint gate does not provide the required bounded live-attach window"
+  grep -Fq "inet $HOST_PROXY_IPV4/16" "$NETWORK_ENTRYPOINT_FILE" \
+    || die "production host-proxy entrypoint gate does not enforce the expected bridge address"
 
   grep -Eq '^[[:space:]]*PGDATA:[[:space:]]*/var/lib/postgresql/data[[:space:]]*$' "$COMPOSE_FILE" || die "required PostgreSQL PGDATA protection is absent"
   for data_path in "$DEPLOY_DIR/data/sub2api" "$DEPLOY_DIR/data/postgres" "$DEPLOY_DIR/data/redis"; do
@@ -343,6 +452,14 @@ collect_running_state() {
       CURRENT_CONTAINER="$container"
     fi
   done
+  container_has_host_proxy_network "$CURRENT_CONTAINER" \
+    || die "production application is not attached to $HOST_PROXY_NETWORK at $HOST_PROXY_IPV4"
+  container_has_expected_process_spec "$CURRENT_CONTAINER" \
+    || die "production application entrypoint or command does not match the deployment contract"
+  host_proxy_network_is_available_for "$CURRENT_CONTAINER" \
+    || die "the host-proxy bridge contains an endpoint not owned by the production application"
+  host_proxy_is_reachable "$CURRENT_CONTAINER" \
+    || die "production application cannot reach the required host proxy endpoint"
 
   CURRENT_IMAGE_ID="$(docker inspect -f '{{.Image}}' "$CURRENT_CONTAINER")"
   CURRENT_REVISION="$(image_label "$CURRENT_IMAGE_ID" "org.opencontainers.image.revision")"
@@ -390,6 +507,7 @@ create_run() {
   chmod 0600 "$RUN_DIR/manifest.env"
   install -m 0600 "$COMPOSE_FILE" "$RUN_DIR/docker-compose.yml"
   install -m 0600 "$ENV_FILE" "$RUN_DIR/.env"
+  install -m 0700 "$NETWORK_ENTRYPOINT_FILE" "$RUN_DIR/network-entrypoint.sh"
   local evidence_source evidence_run_dir promotion_source_run evidence_source_run
   evidence_source="$(jq -r '.evidence' <<<"$RELEASE_EVIDENCE_JSON")"
   evidence_run_dir="$(jq -r '.run_dir' <<<"$RELEASE_EVIDENCE_JSON")"
@@ -486,6 +604,14 @@ assert_unchanged_before_rollout() {
   [[ "$current_container" == "$CURRENT_CONTAINER" ]] || die "production application container changed during preflight; refuse a concurrent rollout"
   current_image="$(docker inspect -f '{{.Image}}' "$current_container")"
   [[ "$current_image" == "$CURRENT_IMAGE_ID" ]] || die "production application image changed during preflight; refuse a concurrent rollout"
+  container_has_expected_process_spec "$current_container" \
+    || die "production application entrypoint or command changed during preflight"
+  container_has_host_proxy_network "$current_container" \
+    || die "production application host-proxy address changed during preflight"
+  host_proxy_network_is_available_for "$current_container" \
+    || die "the host-proxy bridge gained an unrelated endpoint during preflight"
+  host_proxy_is_reachable "$current_container" \
+    || die "production application lost host-proxy reachability during preflight"
   check_http_baseline
 }
 
@@ -592,6 +718,10 @@ verify_candidate_runtime() {
   [[ "$running_ref_name" == "debug" ]] || return 1
   running_repo_digests="$(image_repo_digests_json "$running_image")" || return 1
   repo_digests_match "$running_repo_digests" "$EXPECTED_DIGEST" || return 1
+  container_has_expected_process_spec "$running_container" || return 1
+  container_has_host_proxy_network "$running_container" || return 1
+  host_proxy_network_is_available_for "$running_container" || return 1
+  host_proxy_is_reachable "$running_container" || return 1
   router_ready_url="$(resolve_router_ready_url)" || return 1
   check_status_json "$APP_HEALTH_URL" "ok" || return 1
   check_status_json "$router_ready_url" "ready" || return 1
@@ -602,7 +732,7 @@ rollback_application() {
   info "candidate verification failed; restoring the proven rollback image"
   docker image tag "$CURRENT_IMAGE_ID" "$APP_IMAGE" || return 1
   [[ "$(docker image inspect -f '{{.Id}}' "$APP_IMAGE")" == "$CURRENT_IMAGE_ID" ]] || return 1
-  compose_with_image "$ROLLBACK_TAG" up -d --no-deps --force-recreate sub2api || return 1
+  recreate_application "$ROLLBACK_TAG" || return 1
   wait_for_application_health || return 1
   local running_container
   local running_image
@@ -611,6 +741,10 @@ rollback_application() {
   [[ -n "$running_container" ]] || return 1
   running_image="$(docker inspect -f '{{.Image}}' "$running_container")" || return 1
   [[ "$running_image" == "$CURRENT_IMAGE_ID" ]] || return 1
+  container_has_expected_process_spec "$running_container" || return 1
+  container_has_host_proxy_network "$running_container" || return 1
+  host_proxy_network_is_available_for "$running_container" || return 1
+  host_proxy_is_reachable "$running_container" || return 1
   router_ready_url="$(resolve_router_ready_url)" || return 1
   check_status_json "$APP_HEALTH_URL" "ok" || return 1
   check_status_json "$router_ready_url" "ready" || return 1
@@ -733,9 +867,14 @@ main() {
   assert_unchanged_before_rollout
   PRESERVE_ARTIFACTS=1
   ROLLOUT_STARTED=1
+  APPLICATION_RECREATE_STARTED=0
 
   info "replacing only the sub2api application container"
-  if ! compose_with_image "$CANDIDATE_IMAGE_REF" up -d --no-deps --force-recreate sub2api; then
+  if ! recreate_application "$CANDIDATE_IMAGE_REF"; then
+    if (( APPLICATION_RECREATE_STARTED == 0 )); then
+      record status "candidate_failed_before_recreate"
+      die "candidate lifecycle preflight failed before the application container changed; production was left untouched"
+    fi
     handle_candidate_failure
   fi
   if ! verify_candidate_runtime; then

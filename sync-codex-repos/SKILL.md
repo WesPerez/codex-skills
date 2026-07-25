@@ -8,7 +8,7 @@ description: 同步、检查、提交并推送用户的两个全局 Codex Git �
 将以下两个独立仓库作为一个发布批次处理：
 
 - 配置仓库：`C:\Users\Wes\.codex`，预期远端 `https://github.com/WesPerez/codex-profile.git`
-- 技能仓库：`C:\Users\Wes\.codex\skills`，预期远端 `https://github.com/WesPerez/CodexSkills.git`
+- 技能仓库：`C:\Users\Wes\.codex\skills`，预期远端 `https://github.com/WesPerez/codex-skills.git`
 
 用户使用触发语即授权在这两个仓库范围内执行常规拉取、提交和推送，不需要再次询问是否推送。不得扩大到其他仓库、子模块或外部状态。
 

@@ -11,7 +11,11 @@
 
 优化后的正常小版本升级以减少一轮 mine 构建、人工逐例和 fixture 重建为目标。2026-07-23 第一阶段真实 run `29999790284` 已验证：冷跑 8 分 56 秒、同 SHA 热跑 8 分 24 秒，旧成功 run 为 11 分 36 秒到 12 分 24 秒；cache-only Docker build 从 4 分 07 秒降到 14 秒，且始终与 CI 并行，publish 为 33/29 秒。最终候选 run `30001779447` 再把原命令不变的 unit 与 integration 拆成两个必过并行 job，push 到 workflow 完成约 6 分 31 秒；unit/integration job 分别为 5 分 19 秒和 4 分 06 秒，首次 publish 55 秒。当前关键路径是约 5 分钟的 unit，而不是 Docker 或 integration；这些只是少量样本，不承诺固定分钟数。时间目标只能由阶段打点更新，不能作为绕过门禁的 SLA。迁移、上游大改或真实回归必须以正确性为先。
 
-2026-07-24 的 `0.1.164`（现生产 `61d5b363fe7cd370f73517973aec361303afb77f`；上一生产 `13b41759...`）按 diff 与 active inventory 选 34/44 且 34/34 通过。**必要耗时**约 CI 6.2m + promotion 31s + production 45s（约 47 MB dump）。同期浪费来自四候选重复 plan、默认 44 全开、空日志误判、release fault injection/临时 SQL 污染、无 debug 身份硬跑约 25 blocked、以及 5 次 matrix/约 31 份 manual evidence；planner/空日志修复与按 diff 34/44 已落地。提速点是一次成型、精确选例、同 SHA promotion、计划阶段窄化闭环和 apply 后立即 confirm，不是把 catalog 固化成另一个固定 case 数。
+2026-07-24 的 `0.1.164`（上一生产 `61d5b363fe7cd370f73517973aec361303afb77f`）按 diff 与 active inventory 选 34/44 且 34/34 通过。**必要耗时**约 CI 6.2m + promotion 31s + production 45s（约 47 MB dump）。同期浪费来自四候选重复 plan、默认 44 全开、空日志误判、release fault injection/临时 SQL 污染、无 debug 身份硬跑约 25 blocked、以及 5 次 matrix/约 31 份 manual evidence；planner/空日志修复与按 diff 34/44 已落地。提速点是一次成型、精确选例、同 SHA promotion、计划阶段窄化闭环和 apply 后立即 confirm，不是把 catalog 固化成另一个固定 case 数。
+
+`0.1.165` 当前生产为 `322e2c9003afeffc3b5c7c2d6f61e5d02a22ee40`。本次选中 33/44 个 case，33/33 通过；CI run `30165679236` 约 9 分 42 秒，matrix seal 约 8 分 46 秒，promotion `30166630034` 42 秒，成功 apply 24 秒，apply→confirm 3 分 07 秒。plan 到 post-confirm 约 1 小时 41 分 26 秒，其中包含两次失败 apply、约 16 分钟业务中断、事故排查和人工 evidence 等待；这说明机械阶段已提速，但端到端墙钟仍受发布生命周期验证和人工证据影响。
+
+以后需要完善：每个 run 写入 discovery/candidate/CI/debug/matrix/promotion/production/incident 的结构化起止时间；把 manual evidence 的“静态/合成 debug/真实 canary/切换后确认”类型单独统计；部署变更先完成隔离 Docker lifecycle probe，再进入 release seal；pool 行为另建 dev fault-injection 证据，不把正常成功请求当作错误路径证明。
 
 ## 证据生命周期
 

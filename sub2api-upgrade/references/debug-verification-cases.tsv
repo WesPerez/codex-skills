@@ -41,5 +41,5 @@ R1-I2	billing_background	R1	debug	OAuth refresh owner	debug 专属身份无 refr
 R1-I3	billing_background	R1	debug	probe fixture	完整非敏感 map 保留且 probe 与网关结果不矛盾
 R1-J1	frontend	R1	ci	前端关键路径	类型检查、关键 vitest、账号/分组/设置 UI 契约通过
 R2-1	auth	R2	ci+debug	登录/OAuth/API key	受影响回调、会话和权限边界通过
-R2-2	deployment	R2	ci+debug	Compose/脚本/端口	部署 shell、只 pull app、loopback 和数据卷边界通过
+R2-2	deployment	R2	ci+debug	Compose/entrypoint/network lifecycle	部署静态合同、只 pull app、loopback 和数据卷边界通过；触及进程或网络生命周期时还须绑定隔离的 create→process spec→start/gate→live attach→exact IP→command 正例，以及空 CMD、停态-only attach、错误 IP 负例
 R2-3	provider_extended	R2	conditional	Claude/Gemini/其他 provider	仅已配置且路径受影响时跑真实最小 canary

@@ -34,7 +34,7 @@
 | A4 | D3 OpenAI/Responses/pool/retry | 语义重叠、保留差异、协议/调度 case |
 | A5 | D4 Grok/tools/stream | 语义重叠、保留差异、tools/stream case |
 | A6 | 测试与 plan 触发 | 路径→suite/case、漏掉的动态/间接路径；不得缩减最终门禁 |
-| A7 | 运行拓扑与事故卡 | 只读文件/服务证据、Watchtower/Router/Nginx/任务风险；不连生产 DB |
+| A7 | 运行拓扑与事故卡 | 只读文件/服务证据、Watchtower/Router/Nginx/任务风险；涉及 Compose/entrypoint/network 时还要审查隔离 lifecycle probe 输入；不连生产 DB |
 | A8 | 独立反向审查 | 版本倒退、遗漏职责、错误假设、最可能导致第二次 CI 的问题 |
 
 等待全部相关结果。主代理去重并填写职责表；任一职责证据不足时停止。不要让子代理直接编辑候选。
@@ -55,7 +55,7 @@
 | 任务 | 权限/停止点 |
 | --- | --- |
 | 精确 CI waiter | 只运行不带 `--pull` 的 `wait-branch-image.sh`；返回 run/SHA/status，失败即停 |
-| debug readiness | 只读 isolation、端口、fixture manifest 与 snapshot dry-run；不得 start/stop/apply |
+| debug readiness | 只读 isolation、端口、fixture manifest、snapshot dry-run 与部署 lifecycle probe 报告；不得 start/stop/apply |
 | matrix preparation | 核对选中 case、负例、人工断言和身份闸门；不得写 run/evidence |
 | production refresh | 只读文件/HTTP/服务状态；active inventory 和任何生产 DB 查询仍由主代理完成 |
 | report/recovery preparation | 预填职责表、回滚判定与命令参数；不得触发 promotion |

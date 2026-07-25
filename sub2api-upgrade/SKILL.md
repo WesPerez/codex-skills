@@ -9,7 +9,13 @@ description: 安全且尽可能快速地将此主机上的 Sub2API 升级到已�
 
 先读取 [运行时档案](references/runtime-profile.zh-CN.md)、[历史事故与控制](references/historical-incidents.zh-CN.md)、[当前个性化职责](references/current-customization-duties.zh-CN.md)、[快速流水线](references/fast-upgrade-pipeline.zh-CN.md) 和 [子代理编排](references/subagent-orchestration.zh-CN.md)。取得候选 diff 后按触发套件读取 [Debug 验证矩阵](references/debug-verification-matrix.zh-CN.md)。近期会话只补充档案尚未覆盖的新失败模式；不要每次从零重读全部历史。
 
-**当前生产基线（2026-07-24）**：`0.1.164` / `61d5b363fe7cd370f73517973aec361303afb77f`；上一生产 `13b41759f68a85d86c38fba4dad12f13b4792682`。下一次升级以实时 inspect 为准。
+**当前生产基线（2026-07-25 post-confirm）**：`0.1.165` / `322e2c9003afeffc3b5c7c2d6f61e5d02a22ee40`；上一生产 `0.1.164` / `61d5b363fe7cd370f73517973aec361303afb77f`。成功 run 为 `upgrade-20260725T180420Z-322e2c9003af`，状态为 `passed_pending_finalization`；下一次升级仍以实时 inspect 为准。
+
+### 0.1.165 复盘基线
+
+本次候选以 `2730c1c43b29be003925b033f3f9e645e726bb8c` 为上游父提交，仅保留三个职责提交：`0294dea1a`（发布/CI/文档）、`7a70c75ef`（Grok ID 与迁移）和 `322e2c900`（gateway 兼容残差，合并旧 D3/D4）。`AGENTS.md` 与 `BRANCH_DEPLOYMENT.md` 属于发布职责，不属于 gateway；技能文档和生产 Compose 属于本技能/部署层，不计入这三个源码提交。
+
+池模式采用上游更精确的 status-aware cooldown 与 same-account retry（OpenAI `521db6869`、Grok `51f354f5c`），同时保留账号级 retry count/status codes、SSE `response.failed`/trailing 处理、首包和终态保护、first-output 预算及相关测试。移除的是 MINE 的 request-local pin、pool audit、sticky rebind/ExcludedIDs 和 scheduler `pool_mode` projection。对瞬时冻结而言上游方案更优；旧 MINE 的 sticky 防抖和运维审计更丰富但没有完全等价的上游替代。后续升级需要继续用独立 dev fault-injection 和真实调度证据完善这些行为边界；不能把“源码等价”扩大解释为“每个旧实现都原样保留”。
 
 ## 默认并发编排
 
@@ -32,7 +38,7 @@ description: 安全且尽可能快速地将此主机上的 Sub2API 升级到已�
 1. 无法证明目标是 `/root/sub2api-prod-deploy` 的 `sub2api-prod`，或生产应用、PostgreSQL、Redis、Router、Nginx 基线不全绿。
 2. `/root/sub2api-repo` 有未知改动，`main` 不是纯 `upstream/main`，候选职责不清，或候选上游基线/版本早于当前生产。必须用 `plan-sub2api-upgrade.sh` 和源码复核阻止版本倒退；合法语义重建不要求旧 `mine` 是候选祖先。
 3. 没有逐职责完成“旧实现 -> 新上游 -> 剩余差异 -> 自动测试 -> debug canary”的语义对照，或把旧补丁机械 rebase/cherry-pick。
-4. 精确候选 SHA 的 CI、固定分支镜像、隔离 debug、最终完整选中矩阵和日志门禁任一未通过。最终矩阵必须含 R0、U/M diff 精确触发的 case、生产活跃能力触发的真实 canary 与人工补充的间接路径；不得用未启用能力凑全 catalog。SHA、镜像 digest、debug 配置指纹或 fixture 指纹变化都会使相关旧证据失效。
+4. 精确候选 SHA 的 CI、固定分支镜像、隔离 debug、最终完整选中矩阵和日志门禁任一未通过。最终矩阵必须含 R0、U/M diff 精确触发的 case、生产活跃能力触发的真实 canary 与人工补充的间接路径；不得用未启用能力凑全 catalog。若候选或部署输入触及 Compose、entrypoint、command、network、代理或进程生命周期，必须在 release seal 前完成无凭据的真实 Docker lifecycle probe，并把 create/start/live-attach/进程参数/负例证据绑定到 R2-2；静态 `compose config` 或停态 inspect 不能替代。SHA、镜像 digest、debug 配置指纹或 fixture 指纹变化都会使相关旧证据失效。
 5. 新增/修改迁移没有隔离升级演练、runner 口径 checksum 核验和旧应用兼容证明；已应用迁移文件被改写时直接停止，不修补数据库 checksum。
 6. 无法证明旧应用镜像在目标 schema 上可安全回退。生产脚本只在此证明成立时接受 `--rollback-image-safe`。
 7. Watchtower 状态、后台写任务、数据卷或目标镜像来源不清；不得使用浮动标签替代精确 revision 证据。
@@ -98,7 +104,7 @@ bash scripts/wait-branch-image.sh \
    - 真实生成烟测遵守全局规则：使用有意义的代表任务、控制次数和预算；官方 Codex 链路只能由当前官方客户端发起；禁止 Sub2API `Test Connection` 和伪造 Codex 请求头。
 5. 用 `compute-debug-config-fingerprint.sh --json` 生成统一的非敏感配置指纹，再用 `run-debug-matrix.sh` 记录可恢复 attempt。中间修复时跑 `R0 + 受影响套件 + 日志窗`；任何新 commit 都使旧 SHA 证据失效。最终 commit 使用 `mode=release` 重新跑完整选中矩阵，passed case 必须带证据，R0-7 必须带日志窗；R0-1/R0-8 使用 `references/*-evidence.template.json` 的机器契约，人工 case 使用 `manual-verification-evidence.template.json`，最后 `seal` 生成 `release-evidence.json`。
    **release 隔离**：`mode=release` 禁止 fault injection、临时 SQL 改库和 Sub2API Test Connection。这些只可在独立 `mode=dev` 实验 run 中使用，且其日志、fixture 变更与 attempt **不得** 并入 release seal / promotion / 生产 evidence。R0-1/R0-2 未产生业务日志不等于失败；R0-7 仍须有非空、归属明确的日志窗且不得含 fatal 模式。生产 post-confirm 的日志窗单独归档，空窗可记录为 clean empty window，不能反向充当 debug R0-7 证据。
-   先用 `run-debug-adapter.sh run-ready --run-dir <dir>` 串行处理全部未完成 case；它跨 run 共用 debug 全局锁，并按 blocked(71) > failed(70) > needs_manual(78) > passed(0) 汇总。只要其他选中 case 尚未全部 `passed/skipped_not_triggered`，runner 就把 R0-7 保持为 pending，单 case release `run` 也拒绝提前执行；补齐结构化 manual/rollback evidence 后再次运行 `run-ready`，让 R0-7 扫到最终 canary 窗。旧 run 若已有过早的 passed R0-7，`run-ready` 自动创建最终 attempt；seal/verify 按 adapter checkpoint 的真实 `log_window.until` 拒绝未覆盖其他最终 passed attempt 的证据。当前只有 R0-1、R0-2、R0-7 是自动 adapter；其余场景在经过真实 debug 审计并落地 case 脚本前明确为 manual。自动 pass 必须绑定同 attempt 的 adapter checkpoint；manual pass 必须是结构化 JSON，普通文字、占位证据、任意 shell/URL/path 都不能进入 release seal。中断的 `no_replay` 请求只收束为 blocked，不自动重发。
+   先用 `run-debug-adapter.sh run-ready --run-dir <dir>` 串行处理全部未完成 case；它跨 run 共用 debug 全局锁，并按 blocked(71) > failed(70) > needs_manual(78) > passed(0) 汇总。只要其他选中 case 尚未全部 `passed/skipped_not_triggered`，runner 就把 R0-7 保持为 pending，单 case release `run` 也拒绝提前执行；补齐结构化 manual/rollback evidence 后再次运行 `run-ready`，让 R0-7 扫到最终 canary 窗。旧 run 若已有过早的 passed R0-7，`run-ready` 自动创建最终 attempt；seal/verify 按 adapter checkpoint 的真实 `log_window.until` 拒绝未覆盖其他最终 passed attempt 的证据。当前只有 R0-1、R0-2、R0-7 是自动 adapter；其余场景在经过真实 debug 审计并落地 case 脚本前明确为 manual。manual evidence 必须明确写出它是 CI/静态审查、合成 debug、真实 canary 还是切换后确认，不能用 `executor=canary` 或 `executor=official-codex` 的名称替代实际请求证据。自动 pass 必须绑定同 attempt 的 adapter checkpoint；manual pass 必须是结构化 JSON，普通文字、占位证据、任意 shell/URL/path 都不能进入 release seal。中断的 `no_replay` 请求只收束为 blocked，不自动重发。
 6. 预列故意负例的 UTC 时间窗、预期状态码和日志形状。任何 panic、迁移失败、HTTP 200 后的 `response.failed`、非预期 4xx/5xx、协议终态缺失或新增未解释 error 都必须定位。
 
 ### 4. 推进同一 SHA
@@ -141,6 +147,8 @@ bash scripts/update-sub2api.sh \
 ```
 
 脚本先重新验算 sealed matrix 与 promotion receipt，并实时确认 `origin/mine`、`origin/debug` 仍等于候选，再拉取 `mine-sha-<40>@digest`、建立 PostgreSQL dump，只 recreate `sub2api`，并在运行态复核 image ID、revision、digest、内容身份、Router 活跃槽和 Nginx/SNI。它不更新 PostgreSQL/Redis，也不自动恢复数据库。
+
+生产若依赖宿主机代理 bridge，还必须把部署层网络生命周期视为本次发布输入：Compose 显式保留应用 CMD，入口 gate 在原 entrypoint/迁移前等待，脚本只对运行中容器接入内置 bridge，并核验实际容器进程配置、精确 IP 和代理可达性。任何 Compose/entrypoint/network 变更都要在 release seal 前用无凭据候选容器完成真实生命周期探针；探针必须包含“created -> process spec -> start/gate -> live attach -> exact IP -> application command”正例，以及空 CMD、停态-only attach 和错误 IP 的负例。`compose config`、dry-run 或停态 inspect 不能替代。
 3. **apply 后立即确认**（不得拖到 24h finalize）：对每个 active inventory provider 用当前官方 Codex 客户端做一次有意义 canary（复用本切换窗内已有合规 evidence，非必要不重发），再：
 
 ```bash
@@ -154,6 +162,12 @@ bash scripts/confirm-production-upgrade.sh \
 
 脚本只校验/归档，不发模型请求、不用 Test Connection、不改生产服务。它核验每个 required provider 的 live confirmation、切换后日志窗、revision/digest/image、dump 与健康/Router/Nginx 基线；`--require-providers` 只能断言与 active inventory 完全一致，不能缩小覆盖；通过后可安全 `--stop-debug`（只 stop 容器，保留数据目录）。无共享凭据闭环下，post-confirm 是发布完成的硬条件。失败时只在已证明 image rollback 兼容时回退应用；数据库恢复、配置变更和账号处置需要单独授权。
 4. 报告候选 SHA、上游基线、职责对照、CI run、image digest、schema、fixture 指纹、矩阵结果、日志窗、旧/新 revision、dump sha256、健康、post-confirm canary 与回退状态。不修改 Router 或 Composite 职责/配置，除非本次候选源码明确触及且已单独对照。
+
+## 0.1.165 经验与后续完善方向
+
+本次 `upgrade-20260725T170048Z-322e2c9003af` 与 `upgrade-20260725T172616Z-322e2c9003af` 均进入 `rollback_failed`；第二次造成约 `17:26Z–17:41:48Z` 的应用中断。根因分别是内置 bridge 不接受静态 IP/alias、停态 `network connect` 不形成可用 live sandbox，以及覆盖 entrypoint 时未显式保留 `/app/sub2api` CMD。PostgreSQL/Redis 未重建，失败尝试未应用候选迁移；成功 run `upgrade-20260725T180420Z-322e2c9003af` 于 `18:04:50Z` 通过，`18:07:57Z` 完成 OpenAI/Grok post-confirm。主证据为 `/root/backups/sub2api/upgrade-runs/upgrade-20260725T180420Z-322e2c9003af/incident-and-resolution.json`。
+
+以后需要完善的方向：把生产 Compose/entrypoint/network 生命周期作为 release 输入；为 R2-2 固化隔离网段的真实 lifecycle probe 和负例；为 discovery、失败 run、人工 evidence 和 apply→confirm 记录结构化阶段时间；保持职责快照与实时 diff 同步，并继续验证已舍弃的旧 pool 增强在真实调度和运维观测上的影响。事故记录、dump、失败 run 和回滚资产必须保留到 recovery 链完成收口，不能用“脚本合同通过”代替运行态证据。
 
 ## 升级后收口
 
