@@ -50,3 +50,6 @@
 !/stabilize-v2ray-443/**
 stabilize-v2ray-443/**/__pycache__/
 stabilize-v2ray-443/**/*.pyc
+
+!/diagnose-windows-performance-stutter/
+!/diagnose-windows-performance-stutter/**

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Windows 卡顿诊断"
+  short_description: "用证据定位任意 Windows 应用、游戏或虚拟机卡顿"
+  default_prompt: "Use $diagnose-windows-performance-stutter to diagnose this Windows workload stutter with a read-only baseline, causal evidence, and a reversible A/B plan."
