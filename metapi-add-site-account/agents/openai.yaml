@@ -1,0 +1,4 @@
+interface:
+  display_name: "MetAPI 站点账号接入"
+  short_description: "快速添加 MetAPI 站点与 Session 账号并验收余额签到"
+  default_prompt: "使用 $metapi-add-site-account 将我提供的站点 URL 和 Session Cookie 接入 MetAPI，并验证余额刷新与签到。"
