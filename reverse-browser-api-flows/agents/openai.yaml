@@ -1,0 +1,4 @@
+interface:
+  display_name: "浏览器 API 流程逆向"
+  short_description: "从登录态和前端证据还原可验证、可定时化的网页 API 流程"
+  default_prompt: "使用 $reverse-browser-api-flows 分析这个网页的登录态、前端请求和可安全自动化的 API 流程。"

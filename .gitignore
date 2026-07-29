@@ -56,3 +56,8 @@ stabilize-v2ray-443/**/*.pyc
 
 !/metapi-add-site-account/
 !/metapi-add-site-account/**
+
+!/reverse-browser-api-flows/
+!/reverse-browser-api-flows/**
+reverse-browser-api-flows/**/__pycache__/
+reverse-browser-api-flows/**/*.pyc
