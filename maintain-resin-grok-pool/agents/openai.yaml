@@ -1,0 +1,4 @@
+interface:
+  display_name: "维护 Resin Grok 代理池"
+  short_description: "批量验证、导入并轮换 Resin Grok 出口节点"
+  default_prompt: "使用 $maintain-resin-grok-pool 搜集、验证并安全更新 Resin 中的 Grok 代理池。"

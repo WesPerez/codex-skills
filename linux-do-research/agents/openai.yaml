@@ -1,4 +1,4 @@
 interface:
   display_name: "LINUX DO 研究"
-  short_description: "网络优先的 LINUX DO 搜索，必要时用 Edge 兜底"
-  default_prompt: "使用 $linux-do-research 先用网络方法搜索 LINUX DO；只有在需要更强证据、缺失楼层、附件、收藏或当前标签页细节时，才使用 Edge/浏览器兜底。"
+  short_description: "低频检索 LINUX DO，支持授权登录态、公开 CDN 与有界出口诊断"
+  default_prompt: "使用 $linux-do-research 低频检索 LINUX DO：以论坛原始证据为准，受限正文才使用授权登录态，遇到 429 先原出口延迟重试再做有界出口对照。"

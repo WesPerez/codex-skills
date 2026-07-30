@@ -44,6 +44,7 @@ function Get-CurlClassification {
         [string]$Status
     )
 
+    if ($Status -eq "429") { return "rate-limited" }
     if ($ExitCode -eq 0) { return "http-response" }
     if ($ExitCode -eq 28) { return "timeout" }
     if ($ExitCode -in @(5, 7) -and $Proxy) { return "proxy-failure" }
@@ -66,6 +67,7 @@ for ($index = 0; $index -lt $Url.Count; $index++) {
             ContentType = $null
             ContentLength = $null
             LastModified = $null
+            RetryAfter = $null
             CheckedAt = (Get-Date).ToString('s')
         }
         continue
@@ -81,6 +83,7 @@ for ($index = 0; $index -lt $Url.Count; $index++) {
     $contentTypeMatch = $headers | Select-String '^(?i)Content-Type:\s*(.+)$' | Select-Object -Last 1
     $contentLengthMatch = $headers | Select-String '^(?i)Content-Length:\s*(.+)$' | Select-Object -Last 1
     $lastModifiedMatch = $headers | Select-String '^(?i)Last-Modified:\s*(.+)$' | Select-Object -Last 1
+    $retryAfterMatch = $headers | Select-String '^(?i)Retry-After:\s*(.+)$' | Select-Object -Last 1
 
     $status = if ($meta) { $meta.Matches[0].Groups['status'].Value } elseif ($statusMatch) { $statusMatch.Matches[0].Groups[1].Value } else { "UNKNOWN" }
     [pscustomobject]@{
@@ -93,6 +96,7 @@ for ($index = 0; $index -lt $Url.Count; $index++) {
         ContentType = if ($contentTypeMatch) { $contentTypeMatch.Matches[0].Groups[1].Value.Trim() } else { $null }
         ContentLength = if ($contentLengthMatch) { $contentLengthMatch.Matches[0].Groups[1].Value.Trim() } else { $null }
         LastModified = if ($lastModifiedMatch) { $lastModifiedMatch.Matches[0].Groups[1].Value.Trim() } else { $null }
+        RetryAfter = if ($retryAfterMatch) { $retryAfterMatch.Matches[0].Groups[1].Value.Trim() } else { $null }
         CheckedAt = (Get-Date).ToString('s')
     }
 }

@@ -20,6 +20,7 @@
 关键结论：
 
 - 同一批账号需要的是稳定、已验证且按账号粘性的出口，不是每次请求随机换 IP。
+- 当前 Resin shard 拓扑中，Sub2API `proxy_id` 绑定的是 `GrokEU.shard-N` 逻辑身份，不是物理节点。此时换物理出口必须调用 Resin `DELETE /api/v1/platforms/{id}/leases/{account}`，不能改 `proxy_id`。
 - Cloudflare WARP 只是一种候选出口技术，不能把“换出口后恢复”写成“WARP 必然修复 spending-limit”。
 - 当前生产恢复池是三个已有账号级恢复证据的区域出口；WARP SJC 只有链路健康 canary 证据，不进入账号批量绑定池。
 - 疑似出口型 `402` 可以用单账号、单次指定账号探针验证；成功后再分波绑定。
@@ -123,6 +124,20 @@
 ## 402 恢复流程
 
 只在对象明确为 Grok OAuth 账号、用户授权生产写入且已有恢复点时执行。
+
+### Resin shard 拓扑
+
+账号的 Admin GET 若同时满足 `proxy.username=GrokEU.shard-N`、代理入口指向 Resin 且 snapshot 为 `402`，优先使用 `scripts/recover_402_resin_lease.py`：
+
+1. 只接收 `402 + retry_after_seconds≈86400` 或明确 spending-limit 语义；任何 `429` 都硬排除。
+2. 从 `GrokEU.shard-N` 解析 lease account `shard-N`，保留现有 `proxy_id` 与逻辑身份。
+3. 调 Resin 官方 Admin API 删除该 account 的 sticky lease；`204` 与 lease 已不存在的 `404` 都按幂等结果处理。
+4. 每账号 24 小时最多一次指定账号 Grok test。成功才显式调用 `clear-rate-limit` 并复核 snapshot `200`、原 `proxy_id`、分组和调度状态不变。
+5. 失败不清 cooldown，首个失败停止本波并进入全局退避。状态文件只记录账号 ID、逻辑 shard、时间和脱敏结果。
+
+该路径禁止 `PUT /accounts/{id}`，也不能复用会写 `proxy_id` 的旧 `recover_batch.py` 主流程。
+
+### 旧固定出口拓扑
 
 1. 从被动 snapshot 冻结 `402 + active + schedulable + 目标 Grok 分组 + 非 child + proxy 空` 的候选集。
 2. 通过 Admin API 核验出口 proxy 为 active，并从主机服务和历史证据确认它属于已验证生产出口；不要靠名称猜测。

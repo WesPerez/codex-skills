@@ -12,6 +12,8 @@
 
 !/linux-do-research/
 !/linux-do-research/**
+linux-do-research/**/__pycache__/
+linux-do-research/**/*.pyc
 
 !/find-linuxdo-node-links/
 !/find-linuxdo-node-links/**
@@ -36,6 +38,8 @@
 
 !/grok-sub2api-ops/
 !/grok-sub2api-ops/**
+grok-sub2api-ops/**/__pycache__/
+grok-sub2api-ops/**/*.pyc
 
 !/sub2api-upgrade/
 !/sub2api-upgrade/**
@@ -61,3 +65,8 @@ stabilize-v2ray-443/**/*.pyc
 !/reverse-browser-api-flows/**
 reverse-browser-api-flows/**/__pycache__/
 reverse-browser-api-flows/**/*.pyc
+
+!/maintain-resin-grok-pool/
+!/maintain-resin-grok-pool/**
+maintain-resin-grok-pool/**/__pycache__/
+maintain-resin-grok-pool/**/*.pyc

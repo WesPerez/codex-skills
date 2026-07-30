@@ -46,6 +46,8 @@ https://r.jina.ai/http://linux.do/tag/2138-tag/2138
 powershell -ExecutionPolicy Bypass -File scripts/discover_topics.ps1 -LimitPerTag 30
 ```
 
+脚本对 HTTP 429 和 reader 正文内嵌 429 使用单次运行共享的 60 秒预算：先在同一路径按 30 秒、必要时再 30 秒重试，之后匿名请求才串行切换至多三个显式网络路径。可信 `Retry-After` 超过剩余预算时停止新增请求并输出已收集候选。
+
 脚本输出是候选索引，不是可用性结论。
 
 ## 搜索查询
@@ -74,7 +76,7 @@ https://r.jina.ai/http://search.yahoo.com/search?p=<URL编码查询>
 - Google reader 可能只返回跳转提示。
 - Bing/Brave/DuckDuckGo 可能触发 CAPTCHA。
 - `s.jina.ai` 可能要求 API key。
-- LINUX DO `/search` 经 reader 可能返回 `429`。
+- LINUX DO `/search` 经 reader 可能返回 `429`；按 `linux-do-research/references/network_workflow.md` 的 429 分流继续，不因单一路径受限就放弃检索。
 - 搜索摘要可能泄露已过期直链，只当发现线索。
 
 ## 主题读取

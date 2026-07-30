@@ -45,10 +45,11 @@ description: 在 grok-build-auth 项目中处理 Grok/xAI OAuth 账号生命周�
 
 用户报告 Grok OAuth 账号批量 `402`、换出口后恢复，或要求真实 `429` 到期后继续走已验证出口时，读取 [grok-egress-402-warp-429.zh-CN.md](references/grok-egress-402-warp-429.zh-CN.md)。先将账号互斥分为出口型 `402`、明确额度 `429`、传输不确定和 OAuth/permission 问题，不混用处理路径。
 
-1. 出口型 `402` 先用一个账号、一个已验证生产出口和唯一一次指定账号 test 做 canary；通过后再分小波。WARP 只是 canary 候选，不能仅凭 WARP 品牌进入批量恢复池。
-2. 已有被动 snapshot/cooldown 的真实 `429` 使用 `scripts/bind_quota_egress.py` 执行 `plan -> apply`。重新冻结候选、随机种子和均衡映射，写入前建立一次 custom-format 恢复点。
-3. 429 路径只允许 GET、临时 schedulable 隔离、PUT `proxy_id`、恢复 schedulable 和 GET 验收；禁止 `/test`、生成请求、DELETE temp、清 rate limit/overload 或宣称额度恢复。
-4. `proxy_id` 是账号粘性绑定；随机只发生在 plan 内，apply 必须使用 plan hash 锁定的映射。单账号失败只回滚该账号 proxy 和 schedulable。
+1. 如果账号已绑定 Resin 逻辑身份 `GrokEU.shard-N`，使用 `scripts/recover_402_resin_lease.py` 保留 `proxy_id`，只删除该 shard 的 Resin sticky lease；每账号 24 小时最多一次指定账号 test，成功后才清 rate limit，首个失败触发全局退避。硬排除所有 `429`。
+2. 非 Resin 的旧固定出口拓扑才使用“改 `proxy_id` 后 canary”的历史流程；出口型 `402` 先用一个账号、一个已验证生产出口和唯一一次指定账号 test，通过后再分小波。WARP 只是 canary 候选，不能仅凭品牌进入批量恢复池。
+3. 已有被动 snapshot/cooldown 的真实 `429` 使用 `scripts/bind_quota_egress.py` 执行 `plan -> apply`。重新冻结候选、随机种子和均衡映射，写入前建立一次 custom-format 恢复点。
+4. 429 路径只允许 GET、临时 schedulable 隔离、PUT `proxy_id`、恢复 schedulable 和 GET 验收；禁止 `/test`、生成请求、DELETE temp、清 rate limit/overload 或宣称额度恢复。
+5. `proxy_id` 是账号粘性绑定；随机只发生在 plan 内，apply 必须使用 plan hash 锁定的映射。单账号失败只回滚该账号 proxy 和 schedulable。
 
 ## Refresh-revoked 快速路径
 

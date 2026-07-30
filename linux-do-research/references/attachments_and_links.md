@@ -47,6 +47,19 @@
 
 不要提取 cookies 来让 curl 可用。
 
+### 公开 Discourse CDN 快路径
+
+论坛 `upload://<base62>.<ext>` 或 `/uploads/short-url/<base62>.<ext>` 的 `<base62>` 是上传文件 SHA-1 的 Base62 表示。只有同时满足以下条件时，才可不使用登录态解析公开 CDN：
+
+1. 使用 Discourse 当前实现的字母表 `0-9a-zA-Z` 解码为 40 位 SHA-1；
+2. 从论坛当前公开页面或已验证附件响应确定 CDN host 与 `original/4X/a/b/c/<sha1>.<ext>` 路径模式；
+3. 对生成 URL 执行 `HEAD` 或小范围 GET，确认 `200/206`、内容类型、长度与主帖可见附件元数据一致；
+4. 不把账号级 token、私有附件或 secure upload 伪装成公开 CDN。
+
+这是公开附件地址的确定性还原，不是绕过等级权限。受限主题正文仍须使用用户已授权的可见登录态；CDN 验证失败就回到浏览器路径，不枚举目录或猜测对象。
+
+使用 `scripts/discourse_public_upload.py` 完成解码、URL 构造和可选的只读 `HEAD` 验证；不要在临时命令中重复实现 Base62。
+
 ## 下载处理
 
 下载前：
