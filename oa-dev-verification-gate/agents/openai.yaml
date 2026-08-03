@@ -1,0 +1,4 @@
+interface:
+  display_name: "OA 开发验证门禁"
+  short_description: "IDEA 重启与浏览器证据门禁"
+  default_prompt: "使用 $oa-dev-verification-gate 验证 OA 后端运行时日志与新鲜度，必要时安全重启，并捕获浏览器 Network 证据。"

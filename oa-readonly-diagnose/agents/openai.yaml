@@ -1,0 +1,4 @@
+interface:
+  display_name: "OA 只读 SQL 诊断"
+  short_description: "按源码和案例库生成最少步骤的 OA 生产只读诊断 SQL 包。"
+  default_prompt: "Use $oa-readonly-diagnose to trace this OA page/list/popup/approval issue and give me one read-only SQL package to run."

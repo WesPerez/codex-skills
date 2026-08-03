@@ -17,6 +17,8 @@
 7. 证据显示 `codex_apps` 存在且工具数量非常大，而 `node_repl` 只有 3 个工具。设置 `[features] apps = false` 后，在重启/新一轮对话后恢复了直接暴露 `mcp__node_repl__js`。
 8. 随后通过 `mcp__node_repl__js` 验证官方 Chrome 插件运行时：导入内置 `browser-client.mjs`，调用 `agent.browsers.get("extension")`，并列出打开的标签页。
 9. 最后一次脚本修正保留了现有可工作的 `CODEX_CLI_PATH`，而不是强行改回更旧的 `.plugin-appserver` alpha binary。现在运行时修复会清理陈旧路径和临时 `SKY_CUA_*` pipe env，同时不和有效的 Codex CLI 路径对抗。
+10. 历史快照（2026-07-29）：Desktop/runtime 已是 `26.721`，但 installed Chrome plugin 仍是 `26.611`。旧 `browser-client.mjs` 在第 33 行写 `globalThis.process`，触发 `Cannot redefine property: process`；把 marketplace 与当时 Desktop bundled `26.721.41059` 精确同步后，通过 `codex plugin add` 升级 installed cache，干净初始化成功且脚本哈希命中当时的信任列表。版本和哈希会随更新变化，每次排障必须重新读取当前运行时事实。
+11. 同一次核查证明版本升级不是全部：Edge Profile 1 和 Chrome Default 的扩展都存在，但 Edge Native Host 注册项指向的 manifest 已不存在，部署目录为空，扩展后端仍不会出现。旧会话曾在文件消失后短暂可用，只能证明当时尚有存活连接，不能证明重启后持久化健康。官方故障文档要求由用户从插件 UI 重装，禁止代理手写 manifest 或运行 `installManifest.mjs`。
 
 ## 官方发现
 
@@ -63,6 +65,7 @@ codex plugin list
 const { setupBrowserRuntime } = await import("file:///<resolved-current-plugin-root>/scripts/browser-client.mjs");
 await setupBrowserRuntime({ globals: globalThis });
 globalThis.browser = await agent.browsers.get("extension");
+nodeRepl.write(await browser.documentation());
 const tabs = await browser.user.openTabs();
 nodeRepl.write(JSON.stringify({ count: tabs.length, sample: tabs.slice(0, 5).map(t => ({ title: t.title, url: t.url })) }, null, 2));
 ```
@@ -88,6 +91,8 @@ curl.exe -x http://127.0.0.1:10808 -L -A "Mozilla/5.0" https://api.github.com/re
 ## 决策树
 
 - `mcp__node_repl__js` 可见且 Chrome 探针可用：插件链健康。
+- 浏览器客户端导入时报 `Cannot redefine property: process`：先比较 installed plugin 与 Desktop bundled 版本/哈希；不要 reset 重试或继续查工具表面。
+- 新 installed client 初始化成功但 `extension` backend 不可用：版本层已修复，继续查扩展与 Native Host，不要回退旧客户端。
 - `mcp__node_repl__js` 可见但 Chrome 探针超时：检查 Chrome/Edge 扩展、Native Messaging Host 和浏览器进程状态。
 - `node_repl` 已配置但 `mcp__node_repl__js` 不可见：检查 `features.apps`、`openaiDeveloperDocs`、当前 Desktop 版本和工具表面日志。
 - `node_repl` 缺失或路径陈旧：根据 `chrome-native-hosts-v2.json` 修复运行时路径。

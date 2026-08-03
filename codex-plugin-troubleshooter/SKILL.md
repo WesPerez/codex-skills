@@ -28,8 +28,9 @@ description: 诊断并修复 Codex Desktop 插件/工具暴露问题，尤其是
    - 内置浏览器：`browser:control-in-app-browser`
    - Computer Use：`computer-use:computer-use`
 2. 检查当前可调用工具时，不只看聊天 UI 顶层命名空间，也要检查活跃运行时暴露的嵌套工具清单，例如 orchestrator 工具里的 `ALL_TOOLS`。如果任何可调用表面存在 `mcp__node_repl__js`，就使用它。如果只存在 `js_reset` 或 `js_add_node_module_dir`，先用工具发现搜索 `node_repl js`，再判断失败。
-3. 如果缺少 `mcp__node_repl__js`，检查 Codex 内部是否能看到 `node_repl` 但没有暴露给模型。这指向工具表面路由问题，而不是 Chrome 问题。
-4. 检查 `~/.codex/config.toml`、CC Switch provider 模板和 `chrome-native-hosts-v2.json` 是否包含这些键：
+3. 解析浏览器客户端路径时，以当前插件元数据、`codex plugin list`、当前 Desktop bundled marketplace 和运行时信任哈希为准。禁止直接复用旧会话、用户粘贴或旧 skill 链接中的带版本缓存路径；先比较插件版本、`browser-client.mjs` SHA-256 与 `NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S`。
+4. 如果缺少 `mcp__node_repl__js`，检查 Codex 内部是否能看到 `node_repl` 但没有暴露给模型。这指向工具表面路由问题，而不是 Chrome 问题。
+5. 检查 `~/.codex/config.toml`、CC Switch provider 模板和 `chrome-native-hosts-v2.json` 是否包含这些键：
    - `[features] apps = false`
    - `[mcp_servers.node_repl]`
    - `CODEX_CLI_PATH`
@@ -37,16 +38,26 @@ description: 诊断并修复 Codex Desktop 插件/工具暴露问题，尤其是
    - `NODE_REPL_NODE_MODULE_DIRS`
    - `BROWSER_USE_AVAILABLE_BACKENDS`
    - `[plugins."chrome@openai-bundled"] enabled = true`
-5. 使用 Windows UI 兜底前，先通过 `mcp__node_repl__js` 验证官方运行时。
-6. 执行最小的持久修复，然后开启新一轮对话/线程或重启 Codex Desktop。当前请求的工具列表不会热重载。
+6. 使用 Windows UI 兜底前，先通过 `mcp__node_repl__js` 验证官方运行时。
+7. 执行最小的持久修复，然后开启新一轮对话/线程或重启 Codex Desktop。当前请求的工具列表不会热重载。
+
+遇到 `Cannot redefine property: process` 时，不要继续 reset/retry 或排查“有没有工具”。先取异常堆栈：如果落在旧 `browser-client.mjs` 顶部对 `globalThis.process` 的赋值，按版本漂移处理：
+
+1. 记录 Desktop、installed plugin、marketplace 和缓存版本，以及旧/当前脚本哈希。插件版本以当前 bundled `plugin.json` 为准，不要求等于 Desktop 外层包版本。
+2. 证明当前 Desktop bundled 客户端已移除该赋值且其哈希已经在运行时信任列表中；禁止为了让自选脚本通过而手工追加信任哈希。
+3. 备份 `config.toml`、marketplace、installed cache 和 Native Host 状态。
+4. 通过官方 `codex plugin add chrome@openai-bundled --json` 升级已安装插件；如 marketplace 自身陈旧，先把它与当前 Desktop bundled marketplace 精确同步并做目录哈希比对。
+5. 用新 installed cache 做一次干净初始化。若初始化成功但 `agent.browsers.get("extension")` 不可用，首断点已转移到扩展/Native Host 层，不得再归因于 Node REPL 或工具暴露。
+6. 若 Native Host manifest 缺失或无效，自动修复立即停止。必须让用户从 Codex/ChatGPT 插件 UI 重装 Chrome 插件；禁止代理创建或修补 manifest、复制 `extension-host.exe`、改写 `NativeMessagingHosts` 注册表、运行 `installManifest.mjs`，也禁止把这些动作写成“建议的最小修复”。
 
 针对 Edge/OA 验收，在任何修复动作前先做这组无写入验证：
 
 1. 通过 `mcp__node_repl__js` 和官方 `browser-client.mjs` 启动扩展桥。
-2. 调用 `browser.user.openTabs()`。
-3. 根据返回的页签 URL、标题、路由、最近打开时间，以及用户指定的浏览器识别目标；不要根据 `agent.browsers.list().name`、`codex/toolSurface.backend` 或插件目录名判断真实浏览器。
-4. 如果目标 Edge 页签存在，接管该返回的页签对象并继续；不要切到 `mcp__chrome_devtools`。
-5. 如果目标 Edge 页签不存在，先只读检查 Edge 扩展安装、Edge Native Messaging Host 注册、插件运行时可见性和当前工具暴露面。不要在 Chrome 后端会话里调用 `browser.tabs.new()` 后把新建的 Chrome 标签当成 Edge 证据；只有证明真实目标浏览器后，或用户明确接受 Chrome，才允许新开页签。
+2. 首次选定浏览器后，先输出并完整读取 `browser.documentation()`；这一步遵循官方浏览器 skill 的运行时安全协议，不能被连接层探针替代。
+3. 调用 `browser.user.openTabs()` 枚举候选页签。
+4. 根据返回的页签 URL、标题、路由、最近打开时间，以及可见浏览器窗口标题、扩展安装和 Native Host 证据识别用户指定的目标；`openTabs()` 本身不返回浏览器类型，不能根据 `agent.browsers.list().name`、`codex/toolSurface.backend` 或插件目录名断言真实浏览器。
+5. 如果已证明目标 Edge 页签存在，接管该返回的页签对象并继续；不要切到 `mcp__chrome_devtools`。
+6. 如果无法证明目标 Edge 页签存在，先只读检查 Edge 扩展安装、Edge Native Messaging Host 注册、插件运行时可见性和当前工具暴露面。不要在 Chrome 后端会话里调用 `browser.tabs.new()` 后把新建的 Chrome 标签当成 Edge 证据；只有证明真实目标浏览器后，或用户明确接受 Chrome，才允许新开页签。
 
 完整案例历史和精确命令见 `references/casebook.md`。
 
@@ -66,6 +77,8 @@ description: 诊断并修复 Codex Desktop 插件/工具暴露问题，尤其是
 - `features.apps = true` 在受影响的 Desktop 构建中可能用 `codex_apps` 连接器工具淹没工具表面，并隐藏 `mcp__node_repl__js`。官方文档说明 `apps` 默认是 `false`，只用于 ChatGPT Apps/connectors 支持。
 - `openaiDeveloperDocs` MCP 曾在自定义 provider 上造成类似的模型可见工具问题。只把它视为待核验的历史根因；本技能不得自行安装、启用或测试它。只有用户明确要求且 `openai-docs` 技能允许时，才交由该技能处理。
 - Codex 更新可能改变内置运行时路径。需要根据当前 Native Host 注册表修复陈旧的 `node_repl.exe`、`node.exe`、`node_modules` 和 Chrome `latest` junction。
+- Desktop 更新后，已安装 Chrome 插件缓存可能仍停留在旧版本。旧客户端若在模块顶层写 `globalThis.process`，会与新 Node REPL 的只读 process shim 冲突；这是插件版本漂移，不是工具缺失。
+- 当前 bundled 客户端能初始化但扩展后端未出现时，分别核对浏览器 profile 中的扩展、Native Messaging Host 注册项、注册项指向的 manifest 是否存在，以及 host 进程是否只是更新前遗留。不要把“某次旧会话仍能连接”当成重启后可持久工作的证明。
 - 不要仅仅因为另一个注册表项不同，就强制重写有效的 `CODEX_CLI_PATH`。如果路径存在且可用，保留它。
 - 当 Codex 扩展已安装并且 Edge 有 Native Messaging Host 注册项时，Edge 可以通过 Chrome 扩展链工作。检查该注册项前，不要断定“Edge 不支持”。
 - 官方内置浏览器 skill 或扩展后端可能显示为 `Chrome`，但 `browser.user.openTabs()` 返回的仍可能是 Microsoft Edge 用户页签。不要只凭 `agent.browsers.list().name`、`codex/toolSurface.backend` 或插件包名判断真实浏览器；要结合返回页签的 URL/标题/最近打开时间、可见浏览器窗口标题、扩展安装和 Native Host 证据识别。
@@ -111,5 +124,6 @@ curl.exe -x http://127.0.0.1:10808 -L -A "Mozilla/5.0" https://developers.openai
 - 除非断裂层级证明必要，否则不要清插件缓存、重装扩展或重置 Codex。
 - 不要检查 cookies、浏览器存储、密码或会话存储。
 - 修改后先验证配置/注册表持久化，再按最小范围重启或开启新任务，记录是否需要用户完成交互式重启。验证失败时按已记录原值回滚并再次核验；不做宽泛缓存清理。
+- 官方 Chrome 故障文档要求通过插件 UI 重装 Native Host 时，不得手写 manifest、创建空 manifest、运行 `installManifest.mjs` 或用注册表拼装替代。可以先完成客户端版本升级与只读核查，再把这一个明确的 UI 步骤交给用户并在其完成后继续真实页签验收。
 - 修复后通过当前插件技能解析出的运行时入口验证，不使用固定缓存版本路径。确认工具暴露和最小只读探针健康后，把实际浏览器任务交还 `chrome:control-chrome` 或适用的官方浏览器技能；只有浏览器外桌面操作才交给 `computer-use:computer-use`。
 - 最终报告必须包含断裂层级、变更前后值、备份/回滚、重启、验证结果、未解决风险和交接目标。

@@ -1,0 +1,4 @@
+interface:
+  display_name: "OA 真实动作证据"
+  short_description: "真实 OA 点击证据门禁"
+  default_prompt: "使用 $oa-real-action-evidence 核实环境和 origin，分类真实 OA 点击，在高风险动作前确认，并以脱敏方式捕获 Network、console、可见消息、下载和回滚/读回要求。"
